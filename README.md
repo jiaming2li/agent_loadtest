@@ -138,6 +138,9 @@ for event in watcher.stream(...):
 
 
 ### Image Replacement/resource adjustment
-replace container/resource adjustment image when claiming a sandbox
-claiming, in-place upgrade（pull image, restart,slow）
-creating, a new Sandbox will be created
+#### Upgrade Pre-warmed Pool Sandboxes (SandboxSet)
+**metric**: speed of updating
+**baseline**: 
+**method**: watch version changing
+
+#### Upgrade Claimed Sandboxes (SandboxUpdateOps)
