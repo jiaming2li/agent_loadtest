@@ -24,6 +24,19 @@ steps:
       kubectl apply -f "https://github.com/${KWOK_REPO}/releases/download/${KWOK_LATEST_RELEASE}/kwok.yaml"
       kubectl apply -f "https://github.com/${KWOK_REPO}/releases/download/${KWOK_LATEST_RELEASE}/stage-fast.yaml"
 
+    # 3. 批量创建带 taint 的假节点
+  - name: Create fake nodes with taint
+    run: |
+      for i in $(seq 1 1000); do
+        sed "s/NODE_NAME/kwok-node-$i/" \
+          .github/kwok/node-template.yaml | kubectl apply -f -
+      done
+
+  # 4. 验证节点
+  - name: Verify nodes
+    run: |
+      kubectl get nodes -l type=kwok | wc -l
+
   - name: Run stress test
     run: python test/stress/stress_test.py
 
