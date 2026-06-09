@@ -1,103 +1,55 @@
 # agent_loadtest
 
-100threads*1000sandbox
+1000sandbox
 
-## Tested API
+## Tested func
 How to decide start and end?
-### Sandboxset(template)
-state: creating/available    
-**metric**: speed of claim vs speed of creation or replenishment        
-**method**: 
-- moniter changes of sandbox's number
-- or record time of every sandbox statu change, calulate 
+### Sandboxset 
+**Metrics**  
+
+- sdx creation speed
+```
+# after call k8s apiserver to create sandbox crd, count ++
+sandboxset_controller.go 354
+if err := r.Create(ctx, sbx); err != nil {
+		r.Recorder.Eventf(sbs, corev1.EventTypeWarning, EventCreateSandboxFailed, "Failed to create sandbox: %s", err)
+		return nil, err
+	}
+	sandboxSetSandboxesCreatedTotal.WithLabelValues(sbs.Namespace, sbs.Name).Inc()
+
+sum(rate(sandboxset_sandboxes_created_total[1m]))                       # 全局每秒新建
+rate(sandboxset_sandboxes_created_total{namespace="ns",name="my-sbs"}[1m])  # 单个 SandboxSet
+```
+- 单个 sandbox 预热要多久(延迟分布) 
+```
+# event_handler.go 68-79
+now: oldState == agentsv1alpha1.SandboxStateCreating && newState == agentsv1alpha1.SandboxStateAvailable
+cond.LastTransitionTime.Time # copy time when pod ready condition changes
+newSbx.CreationTimestamp.Time # time when k8s receive request of creating sdx crd
+```
+```
+SandboxStateAvailable   // 被 SBS 管 + sandbox Readycondition is true  → Available
+SandboxStateCreating    // 被 SBS 管 + 没Ready → Creating
+
+```
 
 ### Claim Sandbox
 #### Claiming Sandboxes via E2B SDK
  
-**metric**: latency of from sandbox claiming via E2B SDK to sandbox become running 
-**baseline** Creating Sandbox Directly from Template  
-**method**:  
-```
-start = time.time()
+**Metrics**: 
+- `retries`: number of retries of claiming
+- `wait`: time waiting for idle claim worker 
+- `PickAndLock`:选 sandbox + 改对象 + 加锁 三步合一(Step1+Step2):pickAnAvailableSandbox + modifyPickedSandbox + performLockSandbox。含一次 apiserver Update 写锁。
+- `LockType`:creat/update/speculate
+- `WaitReady`: time waiting for being ready(creat and speculate)
+- `RetryCost`: 浪费在失败尝试上的时间。只有当某次 TryClaimSandbox 失败时,才把它的 Total 累加进来。
 
-#claim sandbox and wait sandbox ready
-with Sandbox.create(template="demo") as sbx:
-    end = time.time()
-    latency = end - start
-```
 
 #### Claiming Sandboxes via SandboxClaim
-**metric**: latency of from sandbox claiming via E2B SDK to sandbox become running  
-**baseline** Creating Sandbox Directly from Template  
-**method**: 
-```
-start = time.time()
-
-# submit SandboxClaim
-kubectl.apply("sandboxclaim.yaml")
-
-# Watch SandboxClaim statu
-# wait Phase become Completed
-watch SandboxClaim until phase == "Completed"
-
-end = time.time()
-latency = end - start
-```
 
 #### Batch Claiming Sandboxes
-**metric**: latency of sandbox claiming via Batch Claiming(single and total latency)   
-**baseline**: Creating Sandbox Directly from Template * replica
-**method**: 
-```
-start = time.time()
-apply_yaml("sandboxclaim.yaml")
-
-seen = set()
-running_times = []
-
-for event in w.stream(...):
-    obj = event["object"]
-    name = obj["metadata"]["name"]
-    phase = obj.get("status", {}).get("phase")
-
-    if phase == "Running" and name not in seen:
-        seen.add(name)
-        running_times.append(time.time() - start)
-
-    if len(running_times) >= replicas:
-        end = time.time()
-        latency = end - start
-        w.stop()
-        break
-
-state_changing_per_second = Counter(running_times)
-
-```
-for multi-round test, dynamically generate yaml file every time
-
-```
-# "label:app" is added as a label on the associated Pod (key: "app")
-Sandbox.create(template="demo", metadata={"label:app": "my-app", "label:env": "production"})
-
-# You can mix labels and annotations
-Sandbox.create(template="demo", metadata={"label:app": "my-app", "userId": "alice"})
-```
-
-```
-Sandbox.create(template="demo", request_timeout=60.0, metadata={
-    "e2b.agents.kruise.io/claim-timeout-seconds": "60"
-})
-```
 
 #### Creating Sandbox Directly from Template(baseline? guarentee same config,use snapshot?)
-```
-start = time.time()
-with Sandbox.create(template="demo", metadata={
-    "e2b.agents.kruise.io/create-on-no-stock": "true"
-}) as sbx:
-    end = time.time()
-    latency = end - start
-```
 
 ### pause/resume
 #### pause
@@ -109,32 +61,7 @@ with Sandbox.create(template="demo", metadata={
 **baseline**: Creating Sandbox Directly from Template
 
 **method**:
-```
-# pause latency
-start = time.time()
-sbx.pause()
 
-watcher = watch.Watch()
-for event in watcher.stream(...):
-    phase = event["object"].get("status", {}).get("phase")
-    
-    if phase == "Paused":   
-        pause_latency = time.time() - start
-        watcher.stop()
-        break
-
-# resume latency
-start = time.time()
-Sandbox.connect(sandbox_id)
-
-for event in watcher.stream(...):
-    phase = event["object"].get("status", {}).get("phase")
-    
-    if phase == "Running":    
-        resume_latency = time.time() - start
-        watcher.stop()
-        break
-```
 
 
 ### Image Replacement/resource adjustment
