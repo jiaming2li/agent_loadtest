@@ -52,8 +52,16 @@ SandboxStateCreating    // 被 SBS 管 + 没Ready → Creating
 #### Creating Sandbox Directly from Template(baseline? guarentee same config,use snapshot?)
 
 ### pause/resume
-#### pause
-**metric**: latency from func call to sandbox's status become paused  
+#### pause   
+pause:  删 Pod（释放 CPU/内存等算力），但保留 sandbox 对象 + 持久化状态      
+resume: 重建 Pod + 恢复状态     
+持久化卷(VolumeClaimTemplates,见 sandbox_controller.go:180 ensureVolumeClaimTemplates 注释「for persistent data recovery during sleep/wake」);
+**metric**:  
+***controller level*: `source="k8s"`(真实生命周期)  
+`sandbox_status_unpaused`:pause 完成(True)后变 0;resume 后 condition 被删,这个 gauge 不再被更新,可能停在旧值直到 deleteSandboxMetrics 清掉(staleness 坑)。   
+***sandbox-manager*: `source = e2b`(api) 
+
+
 **baseline**: no
 
 #### resume
