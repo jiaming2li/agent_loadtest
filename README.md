@@ -1,6 +1,85 @@
 # agent_loadtest
 
-1000sandbox
+#### sandboxset monitor
+**replicas**: 1k(claim batch size:100,500),10k(claim batch size:500,5k),100k(claim batch size:5k,50k)
+**metrics**(sandbox status:): 
+- gauge(available?)=
+- speed of creating = rate(sandboxset_sandboxes_created_total{namespace,name})(r.Create(Sandbox))
+- speed of available = rate(sandbox_creation_total{namespace,result})(第一次变ready)
+- 失败率       → sandbox_creation_total{failure}/replica
+- (replica-gauge)/replica?
+- speed of update:
+  in place: rate(sandbox_inplace_update_duration_seconds_count),sandbox_inplace_update_duration_seconds(从控制器收到通知先打false,k8sresize,打 	true)
+  rolling: update(更新完所有的总时间),（deriv(sandboxset_updated_replicas[1m])）,duration需要加上
+
+
+duration:sandbox_creation_duration_seconds(creation→ready 的时长直方图)。
+sandbox_claim_creation_responses{namespace,result}
+#### E2E e2b leval(sandbox-manager level)
+
+```
+results = [] 
+
+def create(template): return measure("create", lambda: Sandbox(template=template))
+def pause(sbx):       return measure("pause",  lambda: sbx.pause())
+def resume(sbx):      return measure("resume", lambda: sbx.connect())
+def delete(sbx):      return measure("delete", lambda: sbx.kill())
+
+def measure(op, fn):
+    start = time.monotonic()
+    ok, err, ret = True, None, None
+    try:
+        ret = fn()
+    except Exception as e:
+        ok, err = False, repr(e)
+    end = time.monotonic()
+    results.append((op, start, end - start, ok, err))
+    return ret
+
+```
+
+#### reconcile sandbox-controller level
+- sandboxset create:
+- sandbox update:
+- workqueue depth:
+SandboxSet 控制器(管池子)
+type	触发	轻重
+scale_up	数量不够,补池建新	中
+scale_down	数量多了,删	中
+rolling_update	版本变了,删旧建新	重
+gc_dead	清理 dead sandbox	轻
+status_sync	子 sandbox 变了,只重算状态	轻
+noop	没事 / 等 expectation	极轻
+Sandbox 控制器(管单个实例)
+type	触发	轻重
+create_pod	Pending,无 Pod → 建 Pod	中
+sync_ready	Pod ready → 置 Running/Ready	轻
+pause	删 Pod	中
+resume	重建 Pod + 初始化	重
+upgrade	重建升级	重
+inplace_update	原地改	中
+terminating	删除/finalizer	中
+noop	没事	极轻
+SandboxClaim 控制器(管批量 claim)
+type	触发	轻重
+claim_batch	抢一批 sandbox	重
+completed	转完成态	轻
+expired	TTL 到期处理	轻
+noop	等 / 没事	极轻
+SandboxUpdateOps 控制器(管批量升级已 claim 的)
+⚠️ 这个现在零指标,内部分支我没细读,埋点时要先确认。大致:
+
+type	触发
+update_batch	推进一批更新
+rolling / partition	按策略进度
+completed	完成
+noop	等 / 没事
+
+
+#### k8s side(sandbox level)
+
+#### 
+100ksandbox
 
 ## Tested func
 How to decide start and end?
