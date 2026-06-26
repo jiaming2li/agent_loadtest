@@ -1,21 +1,35 @@
-# agent_loadtest
+# Agent_loadtest
 
-#### sandboxset monitor
+### Sandboxset monitor
 **replicas**: 1k(claim batch size:100,500),10k(claim batch size:500,5k),100k(claim batch size:5k,50k)
 **metrics**(sandbox status:): 
-- gauge(available?)=
-- speed of creating = rate(sandboxset_sandboxes_created_total{namespace,name})(r.Create(Sandbox))
-- speed of available = rate(sandbox_creation_total{namespace,result})(第一次变ready)
-- 失败率       → sandbox_creation_total{failure}/replica
-- (replica-gauge)/replica?
-- speed of update:
-  in place: rate(sandbox_inplace_update_duration_seconds_count),sandbox_inplace_update_duration_seconds(从控制器收到通知先打false,k8sresize,打 	true)
-  rolling: update(更新完所有的总时间),（deriv(sandboxset_updated_replicas[1m])）,duration需要加上
+- `sandboxset_replicas`(gauge) = creating+available+running+paused
+- speed of creating = rate(`sandboxset_sandboxes_created_total{namespace,name}`)
+- speed of available = rate(`sandboxset_sandboxes_available_total{namespace, name}`)需要新加
+- 失败率:`sandbox_creation_total{failure}`/`sandboxset_sandboxes_created_total`
+- 缺口1: spec.Replicas - `sandboxset_desired_replicas`
+- 缺口2: spec.Replicas - `sandboxset_updated_available_replicas`
+- rolling update: 更新完所有的总时间
+- 最新版本的sandbox:`sandboxset_updated_replicas`,单个duration需要加上?
+- 最新版本的更新速度：需要新加：`sandboxset_sandboxes_updated_total{namespace, name} `
+- sandboxset_claims_total: 针对该 set 的 claim 操作累计，`sandboxset_sandboxes_claimed_total{namespace, name}`,只有cr路径，需要加e2b
 
 
 duration:sandbox_creation_duration_seconds(creation→ready 的时长直方图)。
 sandbox_claim_creation_responses{namespace,result}
-#### E2E e2b leval(sandbox-manager level)
+
+Counter	在哪	含义
+sandboxset_sandboxes_created_total{namespace,name}	sandboxset 控制器	补池创建累计
+sandboxset_sandboxes_claimed_total{namespace,name}	sandboxset 控制器(source=k8s)	被 claim 累计(仅 CR 路径)
+sandboxset_claims_total	sandboxclaim/core	针对该 set 的 claim 操作累计
+缺的(要补):sandboxset_sandboxes_deleted_total(删除/缩容)、sandboxset_sandboxes_updated_total(更新)。
+
+所以现成 counter 就 created / claimed(+ claims_total),删除和更新没有。
+
+- speed of available = rate(`sandbox_creation_total{namespace,result}`)(第一次变ready)，不是某个set是所有的
+in place: rate(`sandbox_inplace_update_duration_seconds_count`),*sandbox_inplace_update_duration_seconds(从控制器收到通知先打false,k8sresize,打 	true)* 也是所有的
+
+### E2E e2b leval(sandbox-manager level)
 
 ```
 results = [] 
@@ -38,45 +52,45 @@ def measure(op, fn):
 
 ```
 
-#### reconcile sandbox-controller level
-- sandboxset create:
-- sandbox update:
+### Reconcile sandbox-controller level
+
 - workqueue depth:
-SandboxSet 控制器(管池子)
-type	触发	轻重
-scale_up	数量不够,补池建新	中
-scale_down	数量多了,删	中
-rolling_update	版本变了,删旧建新	重
-gc_dead	清理 dead sandbox	轻
-status_sync	子 sandbox 变了,只重算状态	轻
-noop	没事 / 等 expectation	极轻
-Sandbox 控制器(管单个实例)
-type	触发	轻重
-create_pod	Pending,无 Pod → 建 Pod	中
-sync_ready	Pod ready → 置 Running/Ready	轻
-pause	删 Pod	中
-resume	重建 Pod + 初始化	重
-upgrade	重建升级	重
-inplace_update	原地改	中
-terminating	删除/finalizer	中
-noop	没事	极轻
-SandboxClaim 控制器(管批量 claim)
-type	触发	轻重
-claim_batch	抢一批 sandbox	重
-completed	转完成态	轻
-expired	TTL 到期处理	轻
-noop	等 / 没事	极轻
-SandboxUpdateOps 控制器(管批量升级已 claim 的)
+  
+**SandboxSet 控制器(管池子)**
+- **scale_up*	
+- **scale_down*
+- rolling_update（单轮，MaxUnavailable 为上限）
+- gc_dead	清理 dead sandbox
+- status_sync	子 sandbox 变了,只重算状态
+
+**Sandbox 控制器(管单个实例)**
+- create_pod	Pending,无 Pod → 建 Pod
+- sync_ready	Pod ready → 置 Running/Ready
+- pause	删 Pod
+- resume	重建 Pod + 初始化
+- upgrade	重建升级
+- inplace_update	原地改
+- terminating	删除/finalizer
+
+**SandboxClaim 控制器(管批量 claim)**
+- claim_batch	抢一批 sandbox
+- completed	转完成态
+- expired	TTL 到期处理
+
+**SandboxUpdateOps** 控制器(管批量升级已 claim 的)
 ⚠️ 这个现在零指标,内部分支我没细读,埋点时要先确认。大致:
+- update_batch	推进一批更新
+- rolling / partition	按策略进度
+- completed	完成
 
-type	触发
-update_batch	推进一批更新
-rolling / partition	按策略进度
-completed	完成
-noop	等 / 没事
+### k8s side(sandbox level)
+单个 sandbox 的 Pod,k8s 自己做的事(不是 OpenKruise reconcile):
 
-
-#### k8s side(sandbox level)
+阶段	k8s 组件	指标	kwok 下
+写 Sandbox/Pod 落库	apiserver + etcd	apiserver_request_duration、etcd fsync/commit、db size	真
+调度 Pod 到节点	scheduler	scheduler_e2e_scheduling_duration	真(kwok 假节点)
+起 Pod → Running	kubelet / kwok	(kwok 模拟)	假
+Pod Ready	kubelet / kwok	PodReady condition 时间戳	假(kwok stage 时序)
 
 #### 
 100ksandbox
