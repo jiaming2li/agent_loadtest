@@ -12,22 +12,22 @@
 ## E2E Test(e2b/cr)
 ### tested functions
 
-| Function | Entry point | Tested | Layers exercised | Rationale |
-|---|---|:---:|---|---|
-| **Claim** | `POST /sandboxes` (pool) | ✅ | manager + apiserver + sandbox/sandboxset ctrl | Primary user op. Pick + lock + retry path; draining the pool also exercises refill. |
-| **Pause** | `POST /sandboxes/{id}/pause` | ✅ | manager (thin) + sandbox ctrl | Core lifecycle. Manager write + controller convergence (`pauseTask.Wait`). |
-| **Resume** | `POST /sandboxes/{id}/connect` | ✅ | manager (thin) + sandbox ctrl | Core lifecycle. New SDK resumes via `connect`; a real resume only when the sandbox is `Paused` (assert `201`). |
-| **Delete** | `DELETE /sandboxes/{id}` | ✅ | manager (thin) + sandbox ctrl + sandboxset (scale) | Core lifecycle. `Kill` is non-blocking → `delete_duration` is already a clean manager segment. |
-| **Rolling update** | SandboxSet `spec.template` → UpdateRevision | ✅ | sandboxset ctrl (rollout) | Distinct controller path none of the four touch. |
-| **In-place update** | SandboxUpdateOps CR | ⚠️ | sandboxupdateops ctrl | Test, **but** this controller has **zero metrics** today — add batch-progress + convergence instrumentation first. |
-| **Checkpoint / Snapshot** | `POST /sandboxes/{id}/snapshots` | ❌ | (real sidecar/node) | Snapshot = memory/fs dump of a **real** container. Kwok fakes pods → the heavy work cannot run; only CR bookkeeping remains, which apiserver/etcd capacity already covers. |
-| **Clone** | `POST /sandboxes` (checkpoint id) | ❌ | (real sidecar/node) | Distinguishing cost is restore + `ReInitRuntime` + CSI remount — exactly what is stubbed on Kwok. Control-plane part ≈ Create. |
-| **Set timeout** | `POST /sandboxes/{id}/timeout` | ❌ | manager (thin) + apiserver | Cheap write on the same path as Pause's write — no new coverage. |
-| **Connect (already Running)** | `POST /sandboxes/{id}/connect` | ❌ | manager (thin) | When not paused it is an extend-only timeout write; covered as the no-op branch of Resume. |
-| **List** | `GET /v2/sandboxes` | ❌ | manager (cache read) | No one lists 100k; a realistic list is owner-filtered + paginated → cheap. The manager's memory ceiling is already exercised by the 100k informer footprint. |
-| **Describe** | `GET /sandboxes/{id}` | ❌ | manager (cache read) | Single-object cache hit, negligible. |
-| **Batch claim** | SandboxClaim CR | ❌\* | sandboxclaim ctrl | Skip unless batch claiming is a real workload; manager Claim already covers claim semantics. (\*flip to ⚠️ if in scope.) |
-| **List snapshots / templates / API keys** | `GET /snapshots`, `/templates`, `/api-keys` | ❌ | manager (read / admin) | Admin/read endpoints, not hot-path load. |
+| Method | Tested | Rationale |
+|---|---|---|
+| `ClaimSandbox()` | Y | Primary user op. Pick + lock + retry path; draining the pool also exercises refill. |
+| `PauseSandbox()`| Y | Core lifecycle. Manager write + controller convergence (`pauseTask.Wait`). |
+| `ResumeSandbox()` | Y | Core lifecycle. New SDK resumes via `connect`; a real resume only when the sandbox is `Paused` (assert `201`). |
+| `DeleteSandbox()`| Y | Core lifecycle. `Kill` is non-blocking → `delete_duration` is already a clean manager segment. |
+| SandboxSet `spec.template` → UpdateRevision | Y | Distinct controller path none of the four touch. |
+| SandboxUpdateOps CR | Y | Test, **but** this controller has **zero metrics** today — add batch-progress + convergence instrumentation first. |
+| `CreateCheckpoint()`| N | Snapshot = memory/fs dump of a **real** container. Kwok fakes pods → the heavy work cannot run; only CR bookkeeping remains, which apiserver/etcd capacity already covers. |
+| `CloneSandbox()` | N | Distinguishing cost is restore + `ReInitRuntime` + CSI remount — exactly what is stubbed on Kwok. Control-plane part ≈ Create. |
+| `SetTimeout()` | N | Cheap write on the same path as Pause's write — no new coverage. |
+| `ConnectSandbox()` | N | When not paused it is an extend-only timeout write; covered as the no-op branch of Resume. |
+| `ListSandboxes()` | N | No one lists 100k; a realistic list is owner-filtered + paginated → cheap. The manager's memory ceiling is already exercised by the 100k informer footprint. |
+| `GetClaimedSandbox()` | N | Single-object cache hit, negligible. |
+| Batch claim | SandboxClaim CR | N | Skip unless batch claiming is a real workload; manager Claim already covers claim semantics. (\*flip to ⚠️ if in scope.) |
+| List snapshots / templates / API keys | N | Admin/read endpoints, not hot-path load. |
 
 
 #### e2b
@@ -113,6 +113,12 @@ T_manager(delete) = sandbox_delete_duration (kill does not wait)
 - api  
   apiserver 占比 ≈ rate(rest_client_request_duration_seconds_sum) / rate(reconcile_time_sum)
 
+#### resource usage
+- rate(process_cpu_seconds_total) —— 关键,区分 compute-bound vs 等队列/apiserver
+- process_resident_memory_bytes / go_memstats_heap_* —— 100k 下 informer cache footprint
+- go_goroutines、go_gc_duration_seconds
+- (active_workers vs MaxConcurrentReconciles —— 已有)
+
 
 
 ### k8s side(sandbox level)
@@ -128,6 +134,8 @@ T_manager(delete) = sandbox_delete_duration (kill does not wait)
 - etcd_disk_wal_fsync_duration_seconds —— WAL 落盘延迟(写的根瓶颈)
 - etcd_request_duration_seconds —— etcd 操作延迟
 - etcd_db_total_size —
+- apiserver:CPU + 内存(apiserver 进程/容器)
+- etcd:CPU + 内存,但更要紧的是磁盘——etcd 通常先 fsync/磁盘瓶颈,后 CPU。所以这层 etcd_disk_wal_fsync_duration + 磁盘 I/O 的优先级高于 CPU(已有 fsync)
 
 
 
