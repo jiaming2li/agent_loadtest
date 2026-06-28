@@ -117,10 +117,20 @@ T_manager(delete) = sandbox_delete_duration (kill does not wait)
 
 ### k8s side(sandbox level)
 
-**current**: 
-rest_client_request_duration_seconds{verb, host}   # 每次 apiserver 调用多久（客户端视角）
-rest_client_requests_total{verb, code, host}        # 调用次数，按 verb + HTTP 状态码
-request_duration:从发请求 → 收到响应,= 一次 apiserver 调用的耗时(含网络 + apiserver 处理 + etcd 写 + 返回)。
-{verb}:GET/POST/PUT/PATCH/DELETE。
-{code}:200/409(冲突)/429(APF 限流)…—— 所以锁冲突、限流能从这看到
+### method
+
+### metrics
+- `rest_client_rate_limiter_duration_seconds`: manager/controller's QPS/Burst ratelimitter
+- `rest_client_request_duration_seconds{verb,host}`, rtt of rest_client call
+- rest_client_requests_total{verb,code,host} 409 = 锁冲突,429 = APF 限流
+- apiserver_request_duration_seconds
+- apiserver_flowcontrol_*(rejected / waiting)—— APF 拒绝/排队,即 429 的根源
+- etcd_disk_wal_fsync_duration_seconds —— WAL 落盘延迟(写的根瓶颈)
+- etcd_request_duration_seconds —— etcd 操作延迟
+- etcd_db_total_size —
+
+
+
+
+
 
