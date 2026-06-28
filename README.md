@@ -1,7 +1,33 @@
 # OKA_KWOK_Loadtest
 
+## Global Sandboxset Test
+#### method
+#### metrics
+- speed of creating = rate(`sandboxset_sandboxes_created_total{namespace,name}`)
+- *speed of available/repleshment* = rate(`sandboxset_sandboxes_available_total{namespace, name}`)
+- speed of delete = `sandboxset_sandboxes_deleted_total`(删除/缩容)
+- rate of failure: `created_total{result="failure"}` / `created_total`
+- 缺口1: `spec.Replicas` - available(gauge)
+
 ## E2E Test(e2b/cr)
 ### tested functions
+
+| Function | Entry point | Tested | Layers exercised | Rationale |
+|---|---|:---:|---|---|
+| **Claim** | `POST /sandboxes` (pool) | ✅ | manager + apiserver + sandbox/sandboxset ctrl | Primary user op. Pick + lock + retry path; draining the pool also exercises refill. |
+| **Pause** | `POST /sandboxes/{id}/pause` | ✅ | manager (thin) + sandbox ctrl | Core lifecycle. Manager write + controller convergence (`pauseTask.Wait`). |
+| **Resume** | `POST /sandboxes/{id}/connect` | ✅ | manager (thin) + sandbox ctrl | Core lifecycle. New SDK resumes via `connect`; a real resume only when the sandbox is `Paused` (assert `201`). |
+| **Delete** | `DELETE /sandboxes/{id}` | ✅ | manager (thin) + sandbox ctrl + sandboxset (scale) | Core lifecycle. `Kill` is non-blocking → `delete_duration` is already a clean manager segment. |
+| **Rolling update** | SandboxSet `spec.template` → UpdateRevision | ✅ | sandboxset ctrl (rollout) | Distinct controller path none of the four touch. |
+| **In-place update** | SandboxUpdateOps CR | ⚠️ | sandboxupdateops ctrl | Test, **but** this controller has **zero metrics** today — add batch-progress + convergence instrumentation first. |
+| **Checkpoint / Snapshot** | `POST /sandboxes/{id}/snapshots` | ❌ | (real sidecar/node) | Snapshot = memory/fs dump of a **real** container. Kwok fakes pods → the heavy work cannot run; only CR bookkeeping remains, which apiserver/etcd capacity already covers. |
+| **Clone** | `POST /sandboxes` (checkpoint id) | ❌ | (real sidecar/node) | Distinguishing cost is restore + `ReInitRuntime` + CSI remount — exactly what is stubbed on Kwok. Control-plane part ≈ Create. |
+| **Set timeout** | `POST /sandboxes/{id}/timeout` | ❌ | manager (thin) + apiserver | Cheap write on the same path as Pause's write — no new coverage. |
+| **Connect (already Running)** | `POST /sandboxes/{id}/connect` | ❌ | manager (thin) | When not paused it is an extend-only timeout write; covered as the no-op branch of Resume. |
+| **List** | `GET /v2/sandboxes` | ❌ | manager (cache read) | No one lists 100k; a realistic list is owner-filtered + paginated → cheap. The manager's memory ceiling is already exercised by the 100k informer footprint. |
+| **Describe** | `GET /sandboxes/{id}` | ❌ | manager (cache read) | Single-object cache hit, negligible. |
+| **Batch claim** | SandboxClaim CR | ❌\* | sandboxclaim ctrl | Skip unless batch claiming is a real workload; manager Claim already covers claim semantics. (\*flip to ⚠️ if in scope.) |
+| **List snapshots / templates / API keys** | `GET /snapshots`, `/templates`, `/api-keys` | ❌ | manager (read / admin) | Admin/read endpoints, not hot-path load. |
 #### e2b
 ```
 results = [] 
@@ -23,27 +49,25 @@ def measure(op, fn):
     return ret
 
 ```
-metrics: p50, p90, p95, tps
+**metrics**: 
+- p50, p90, p95, p99
+- tps
+- success count
+- error count(409 conflict / 429 ratelimit / timeout / 500)
 
 #### CR
 
 - rolling update(change `SandboxSet spec.template` → UpdateRevision)  
-  metrics:
-  - total time
-  - speed(最新版本的sandbox:`sandboxset_updated_replicas`,单个duration需要加上?)- 最新版本的更新速度：需要新加：`sandboxset_sandboxes_updated_total{namespace, name} ` 
+  - metrics:
+      - total time
+      - rate(*sandboxset_sandboxes_updated_total{namespace,name}*) 
 
 - in-place update(`SandboxUpdateOps` cr)  
-   metrics:
-  - total time
-  - speed(rate(`sandbox_inplace_update_duration_seconds_count`)) 
+   **metrics**:
+      - total time
+      - speed(rate(`sandbox_inplace_update_duration_seconds_count`)) 
 
-  
-#### sandboxset metrics
-- speed of creating = rate(`sandboxset_sandboxes_created_total{namespace,name}`)
-- speed of available = rate(`sandboxset_sandboxes_available_total{namespace, name}`)需要新加
-- speed of delet = sandboxset_sandboxes_deleted_total(删除/缩容)
-- 失败率:`sandbox_creation_total{failure}`/`sandboxset_sandboxes_created_total`
-- 缺口1: spec.Replicas - `sandboxset_desired_replicas`
+
 
 ## Sandbox-manager test
 
