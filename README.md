@@ -28,6 +28,8 @@
 | **Describe** | `GET /sandboxes/{id}` | ❌ | manager (cache read) | Single-object cache hit, negligible. |
 | **Batch claim** | SandboxClaim CR | ❌\* | sandboxclaim ctrl | Skip unless batch claiming is a real workload; manager Claim already covers claim semantics. (\*flip to ⚠️ if in scope.) |
 | **List snapshots / templates / API keys** | `GET /snapshots`, `/templates`, `/api-keys` | ❌ | manager (read / admin) | Admin/read endpoints, not hot-path load. |
+
+
 #### e2b
 ```
 results = [] 
@@ -63,7 +65,7 @@ def measure(op, fn):
       - rate(*sandboxset_sandboxes_updated_total{namespace,name}*) 
 
 - in-place update(`SandboxUpdateOps` cr)  
-   **metrics**:
+   - metrics:
       - total time
       - speed(rate(`sandbox_inplace_update_duration_seconds_count`)) 
 
@@ -71,78 +73,46 @@ def measure(op, fn):
 
 ## Sandbox-manager test
 
-```
-results = [] 
-
-def create(template): return measure("create", lambda: Sandbox(template=template))
-def pause(sbx):       return measure("pause",  lambda: sbx.pause())
-def resume(sbx):      return measure("resume", lambda: sbx.connect())
-def delete(sbx):      return measure("delete", lambda: sbx.kill())
-
-def measure(op, fn):
-    start = time.monotonic()
-    ok, err, ret = True, None, None
-    try:
-        ret = fn()
-    except Exception as e:
-        ok, err = False, repr(e)
-    end = time.monotonic()
-    results.append((op, start, end - start, ok, err))
-    return ret
+### method
 
 ```
-metrics: p50, p90, p95
+T_manager(pause)  = sandbox_pause_duration  − sandbox_pause_wait = refresh + retryUpdate + InplaceRefresh
+T_manager(resume) = sandbox_resume_duration − sandbox_resume_wait = refresh + retryUpdate + InplaceRefresh
+T_manager(claim)  = Total − WaitReady − InitRuntime − CSIMount − SecurityToken = ΣPickAndLock(Total − WaitReady) + Σwait
+T_manager(delete) = sandbox_delete_duration (kill does not wait)
+
+```
+**metrics**: 
+- p50, p90, p95, p99
+- rate(rest_client_request_duration_seconds_sum{verb=~"GET|PUT|PATCH|POST|DELETE"}[5m])/ rate(段_sum[5m])
+- process_cpu
+- go_goroutines
+- heap
+- rest_client_rate_limiter_duration(客户端 QPS/Burst 限流)
 
 
 ## Sandbox-controller test
-### workqueue(different controller)
+
+### method
+
+### metrics
+#### work queue
 - workqueue depth
 - wait time(): rate(`workqueue_queue_duration_seconds_sum{name="sandboxset"}`[5m])/rate(`workqueue_queue_duration_seconds_count{name="sandboxset"}`[5m])
   
 
-### reconcile   
-
-metrics: p50,p90,p99
+#### reconcile   
+- p50,p90,p95,p99
+  rate(controller_runtime_reconcile_time_seconds_sum{controller})/rate(..._count{controller})
+- api
+  apiserver 占比 ≈ rate(rest_client_request_duration_seconds_sum) / rate(reconcile_time_sum)
 
 **current metrics**:   
 - controller reconcile average time: rate(`controller_runtime_reconcile_time_seconds_sum{controller="sandboxset"}`[5m])
   / rate(`controller_runtime_reconcile_time_seconds_count{controller="sandboxset"}`[5m])  
 
-**proposed add**:   
 
-```
-func Reconcile(ctx, req) {
-    ctx = withAPITimer(ctx)        // 累加器
-    start := time.Now()
-    ... // 确定 type；client 调用都累加进 ctx
-    apiTime := getAPITime(ctx)
-    total := time.Since(start)
-    reconcileDuration.WithLabelValues(ctrl, type).Observe(total)        // 总
-    reconcileAPIDuration.WithLabelValues(ctrl, type).Observe(apiTime)   // apiserver 部分
-    // 纯计算 = total − apiTime（也可以直接 Observe 这个）
-}
-```
 
-**SandboxSet**
-- scale_up
-- scale_down
-- rolling_update（single round，MaxUnavailable）
-- gc_dead:	clean dead sandbox
-- status_sync
-
-**Sandbox**
-- create_pod	
-- sync_ready: Pod ready → set Running/Ready
-- pause
-- resume
-- upgrade
-- inplace_update
-- terminating: delete/finalizer
-
-**SandboxClaim 控制器(管批量 claim)**
-- claim_batch
-- completed: set status as completed
-- expired	TTL 到期处理
 
 **SandboxUpdateOps** 控制器(管批量升级已 claim 的)
 ⚠️ 这个现在零指标,内部分支我没细读,埋点时要先确认。大致:
