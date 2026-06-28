@@ -93,6 +93,12 @@ T_manager(delete) = sandbox_delete_duration (kill does not wait)
 
 ## Sandbox-controller test
 
+### controllers
+- SandboxSet
+- Sandbox
+- SandboxClaim
+- SandboxUpdateOps
+
 ### method
 
 ### metrics
@@ -102,23 +108,10 @@ T_manager(delete) = sandbox_delete_duration (kill does not wait)
   
 
 #### reconcile   
-- p50,p90,p95,p99
+- p50,p90,p95,p99  
   rate(controller_runtime_reconcile_time_seconds_sum{controller})/rate(..._count{controller})
-- api
+- api  
   apiserver 占比 ≈ rate(rest_client_request_duration_seconds_sum) / rate(reconcile_time_sum)
-
-**current metrics**:   
-- controller reconcile average time: rate(`controller_runtime_reconcile_time_seconds_sum{controller="sandboxset"}`[5m])
-  / rate(`controller_runtime_reconcile_time_seconds_count{controller="sandboxset"}`[5m])  
-
-
-
-
-**SandboxUpdateOps** 控制器(管批量升级已 claim 的)
-⚠️ 这个现在零指标,内部分支我没细读,埋点时要先确认。大致:
-- update_batch	推进一批更新
-- rolling / partition	按策略进度
-- completed	完成
 
 
 
