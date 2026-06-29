@@ -68,10 +68,9 @@ def measure(op, fn):
 
 - batch claim via cr
   - metrics:
-    - *contention*(core):retry of claim retry / 409 conflict
-        — batch 并联抢同一池子,冲突风暴是核心信号     
-    - convergence(批次收敛):SandboxClaim 创建 → status 到 Completed 的时长
-        + 批次进度 status.UpdatedReplicas/Replicas(已领 / 请求总数)
+    - *contention*(core):retry of claim retry / 409 lock conflict  
+    - total time: status.CompletionTime − creationTimestamp
+    - process: status.UpdatedReplicas/Replicas
     - failure rate: failure count / batch size
 
 - rolling update sandbox in sandboxset(change `SandboxSet spec.template` → UpdateRevision)  
@@ -94,7 +93,7 @@ def measure(op, fn):
     - `wait`: time waiting for claim worker slot
     - `PickAndLock`: pick an available sandbox and change pod/sandbox cr
     - WaitReady: wait pod/sandbox becoming ready
-    - InitRuntime/CSIMount/SecurityToken: need running pod, all is 0 with kwok
+    - InitRuntime(no sidecar)/CSIMount(no running pod)/SecurityToken(no running pod): need running pod, all is 0 with kwok
 - T_manager(pause)  = `sandbox_pause_duration`  − `sandbox_pause_wait` = `refresh` + `retryUpdate` + `InplaceRefresh`
   - `refresh`: read status and make sure pause can be done
   - `retryUpdate`: write `Spec.Paused=true`
@@ -114,7 +113,7 @@ def measure(op, fn):
 - process_cpu
 - go_goroutines
 - heap
-- rest_client_rate_limiter_duration(客户端 QPS/Burst 限流)
+- rest_client_rate_limiter_duration(client QPS/Burst ratelimitter)
 
 
 ## Sandbox-controller test
