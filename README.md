@@ -1,7 +1,10 @@
 # OKA_KWOK_Loadtest
 
-## preview
+## Overview
 开环ramp,100k
+#### goal
+#### method
+#### output
 
 ## Global Sandboxset Test
 #### method
@@ -77,14 +80,21 @@ def measure(op, fn):
 
 ### method
 
-
-- T_manager(pause)  = `sandbox_pause_duration`  − `sandbox_pause_wait` = `refresh` + `retryUpdate` + `InplaceRefresh`
-  - `sandbox_pause_wait`:
-  - `refresh`
-  - `retryUpdate`
-  - `InplaceRefresh`
-- T_manager(resume) = sandbox_resume_duration − sandbox_resume_wait = refresh + retryUpdate + InplaceRefresh
 - T_manager(claim)  = Total − WaitReady − InitRuntime − CSIMount − SecurityToken = ΣPickAndLock(Total − WaitReady) + Σwait
+    - `wait`: time waiting for claim worker slot
+    - `PickAndLock`: pick an available sandbox and change pod/sandbox cr
+    - WaitReady: wait pod/sandbox becoming ready
+    - InitRuntime/CSIMount/SecurityToken: need running pod, all is 0 with kwok
+- T_manager(pause)  = `sandbox_pause_duration`  − `sandbox_pause_wait` = `refresh` + `retryUpdate` + `InplaceRefresh`
+  - `refresh`: read status and make sure pause can be done
+  - `retryUpdate`: write `Spec.Paused=true`
+  - `sandbox_pause_wait`: waiting controller pause sandbox
+  - `InplaceRefresh`: read status again and check success
+- T_manager(resume) = sandbox_resume_duration − sandbox_resume_wait = refresh + retryUpdate + InplaceRefresh
+  - `refresh`: read status and make sure pause can be done
+  - `retryUpdate`: write `Spec.Paused=true`
+  - `sandbox_pause_wait`: waiting controller pause sandbox
+  - `InplaceRefresh`: read status again and check success
 - T_manager(delete) = sandbox_delete_duration (kill does not wait)
 
 
@@ -121,8 +131,10 @@ def measure(op, fn):
 
 #### resource usage
 - rate(process_cpu_seconds_total) —— 关键,区分 compute-bound vs 等队列/apiserver
-- process_resident_memory_bytes / go_memstats_heap_* —— 100k 下 informer cache footprint
-- go_goroutines、go_gc_duration_seconds
+- process_resident_memory_bytes /
+- go_memstats_heap_* —— 100k 下 informer cache footprint
+- go_goroutines、
+- go_gc_duration_seconds
 - (active_workers vs MaxConcurrentReconciles —— 已有)
 
 
