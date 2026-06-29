@@ -109,10 +109,10 @@ def measure(op, fn):
 
 **metrics**: 
 - p50, p90, p95, p99
-- rate(rest_client_request_duration_seconds_sum{verb=~"GET|PUT|PATCH|POST|DELETE"}[5m])/ rate(段_sum[5m])
-- process_cpu
-- go_goroutines
-- heap
+- rate(rest_client_request_duration_seconds_sum{verb=~"GET|PUT"}[5m])/rate(rest_client_request_duration_seconds_count{verb=~"GET|PUT"}[5m])
+- process_cpu: cpu usage
+- go_goroutines: goroutine usage
+- heap: memory usage
 - rest_client_rate_limiter_duration(client QPS/Burst ratelimitter)
 
 
@@ -129,22 +129,21 @@ def measure(op, fn):
 ### metrics
 #### work queue
 - workqueue depth
-- wait time(): rate(`workqueue_queue_duration_seconds_sum{name="sandboxset"}`[5m])/rate(`workqueue_queue_duration_seconds_count{name="sandboxset"}`[5m])
+- wait time(): rate(`workqueue_queue_duration_seconds_sum{name=controller}`[5m])/rate(`workqueue_queue_duration_seconds_count{name=controller}`[5m])
   
 
 #### reconcile   
 - p50,p90,p95,p99  
-  rate(controller_runtime_reconcile_time_seconds_sum{controller})/rate(..._count{controller})
+  rate(controller_runtime_reconcile_time_seconds_sum{controller})/rate(controller_runtime_reconcile_time_seconds_count{controller})
 - apiserver  
   apiserver 占比 ≈ rate(rest_client_request_duration_seconds_sum) / rate(reconcile_time_sum)
 
-#### resource usage
-- rate(process_cpu_seconds_total) —— 关键,区分 compute-bound vs 等队列/apiserver
-- process_resident_memory_bytes /
-- go_memstats_heap_* —— 100k 下 informer cache footprint
-- go_goroutines、
+#### resource usage（all controller）
+- rate(process_cpu_seconds_total)
+- process_resident_memory_bytes
+- go_goroutines
 - go_gc_duration_seconds
-- (active_workers vs MaxConcurrentReconciles —— 已有)
+- active_workers(MaxConcurrentReconciles): current working reconcile worker
 
 
 
@@ -161,7 +160,7 @@ def measure(op, fn):
 - etcd_disk_wal_fsync_duration_seconds —— WAL 落盘延迟(写的根瓶颈)
 - etcd_request_duration_seconds —— etcd 操作延迟
 - etcd_db_total_size —
-- apiserver:CPU + 内存(apiserver 进程/容器)
+- apiserver:CPU + 内存
 - etcd:CPU + 内存,但更要紧的是磁盘——etcd 通常先 fsync/磁盘瓶颈,后 CPU。所以这层 etcd_disk_wal_fsync_duration + 磁盘 I/O 的优先级高于 CPU(已有 fsync)
 
 
