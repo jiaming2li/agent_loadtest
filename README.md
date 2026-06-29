@@ -16,17 +16,16 @@
 |---|---|---|
 | `ClaimSandbox()` | Y | Primary user op. Pick + lock + retry path; draining the pool also exercises refill. |
 | `PauseSandbox()`| Y | Core lifecycle. Manager write + controller convergence (`pauseTask.Wait`). |
-| `ResumeSandbox()` | Y | Core lifecycle. New SDK resumes via `connect`; a real resume only when the sandbox is `Paused` (assert `201`). |
+| `ResumeSandbox()`/`ConnectSandbox()` | Y | Core lifecycle. New SDK resumes via `connect`; a real resume only when the sandbox is `Paused` (assert `201`). |
 | `DeleteSandbox()`| Y | Core lifecycle. `Kill` is non-blocking → `delete_duration` is already a clean manager segment. |
 | SandboxSet `spec.template` → UpdateRevision | Y | Distinct controller path none of the four touch. |
 | SandboxUpdateOps CR | Y | Test, **but** this controller has **zero metrics** today — add batch-progress + convergence instrumentation first. |
+| Batch claim/SandboxClaim CR | Y | Skip unless batch claiming is a real workload; manager Claim already covers claim semantics. (\*flip to ⚠️ if in scope.) |
 | `CreateCheckpoint()`| N | Snapshot = memory/fs dump of a **real** container. Kwok fakes pods → the heavy work cannot run; only CR bookkeeping remains, which apiserver/etcd capacity already covers. |
 | `CloneSandbox()` | N | Distinguishing cost is restore + `ReInitRuntime` + CSI remount — exactly what is stubbed on Kwok. Control-plane part ≈ Create. |
 | `SetTimeout()` | N | Cheap write on the same path as Pause's write — no new coverage. |
-| `ConnectSandbox()` | N | When not paused it is an extend-only timeout write; covered as the no-op branch of Resume. |
 | `ListSandboxes()` | N | No one lists 100k; a realistic list is owner-filtered + paginated → cheap. The manager's memory ceiling is already exercised by the 100k informer footprint. |
 | `GetClaimedSandbox()` | N | Single-object cache hit, negligible. |
-| Batch claim | SandboxClaim CR | N | Skip unless batch claiming is a real workload; manager Claim already covers claim semantics. (\*flip to ⚠️ if in scope.) |
 | List snapshots / templates / API keys | N | Admin/read endpoints, not hot-path load. |
 
 
