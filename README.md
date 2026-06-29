@@ -1,5 +1,8 @@
 # OKA_KWOK_Loadtest
 
+## preview
+开环ramp,100k
+
 ## Global Sandboxset Test
 #### method
 #### metrics
@@ -14,17 +17,17 @@
 
 | Method | Tested | Rationale |
 |---|---|---|
-| `ClaimSandbox()` | Y | Primary user op. Pick + lock + retry path; draining the pool also exercises refill. |
-| `PauseSandbox()`| Y | Core lifecycle. Manager write + controller convergence (`pauseTask.Wait`). |
-| `ResumeSandbox()`/`ConnectSandbox()` | Y | Core lifecycle. New SDK resumes via `connect`; a real resume only when the sandbox is `Paused` (assert `201`). |
-| `DeleteSandbox()`| Y | Core lifecycle. `Kill` is non-blocking → `delete_duration` is already a clean manager segment. |
-| SandboxSet `spec.template` → UpdateRevision | Y | Distinct controller path none of the four touch. |
-| SandboxUpdateOps CR | Y | Test, **but** this controller has **zero metrics** today — add batch-progress + convergence instrumentation first. |
-| Batch claim/SandboxClaim CR | Y | Skip unless batch claiming is a real workload; manager Claim already covers claim semantics. (\*flip to ⚠️ if in scope.) |
-| `CreateCheckpoint()`| N | Snapshot = memory/fs dump of a **real** container. Kwok fakes pods → the heavy work cannot run; only CR bookkeeping remains, which apiserver/etcd capacity already covers. |
-| `CloneSandbox()` | N | Distinguishing cost is restore + `ReInitRuntime` + CSI remount — exactly what is stubbed on Kwok. Control-plane part ≈ Create. |
-| `SetTimeout()` | N | Cheap write on the same path as Pause's write — no new coverage. |
-| `ListSandboxes()` | N | No one lists 100k; a realistic list is owner-filtered + paginated → cheap. The manager's memory ceiling is already exercised by the 100k informer footprint. |
+| `ClaimSandbox()` | Y | Core op and the main source of load in real use; exercises all layers (manager + apiserver + controllers).|
+| `PauseSandbox()`| Y | Core lifecycle op; exercises all layers.|
+| `ResumeSandbox()`/`ConnectSandbox()` | Y | Core lifecycle op; exercises all layers.|
+| `DeleteSandbox()`| Y |`Kill` is non-blocking, giving a clean manager-side capacity signal.|
+| SandboxSet `spec.template` → UpdateRevision | Y |Rolling update of the pool (idle members, recreate); a main control-plane load source.|
+| SandboxUpdateOps CR | Y | In-place update of claimed sandboxes; a main control-plane load source.|
+| Batch claim/SandboxClaim CR | Y | CR claim path; bypasses the manager's claim-slot limit.|
+| `CreateCheckpoint()`| N | Heavy work (memory/fs snapshot) runs in the real pod.|
+| `CloneSandbox()` | N | Restore + re-init runs in the real pod (stubbed on Kwok); control-plane part ≈ Claim.|
+| `SetTimeout()` | N | Cheap write on the same path as Pause's write.|
+| `ListSandboxes()` | N | Not a main load source; a correctness concern, not a capacity one.|
 | `GetClaimedSandbox()` | N | Single-object cache hit, negligible. |
 | List snapshots / templates / API keys | N | Admin/read endpoints, not hot-path load. |
 
@@ -58,12 +61,12 @@ def measure(op, fn):
 
 #### CR
 
-- rolling update(change `SandboxSet spec.template` → UpdateRevision)  
+- rolling update sandbox in sandboxset(change `SandboxSet spec.template` → UpdateRevision)  
   - metrics:
       - total time
       - rate(*sandboxset_sandboxes_updated_total{namespace,name}*) 
 
-- in-place update(`SandboxUpdateOps` cr)  
+- rolling update claimed sandbox(`SandboxUpdateOps` cr), limited by    
    - metrics:
       - total time
       - speed(rate(`sandbox_inplace_update_duration_seconds_count`)) 
@@ -74,13 +77,17 @@ def measure(op, fn):
 
 ### method
 
-```
-T_manager(pause)  = sandbox_pause_duration  − sandbox_pause_wait = refresh + retryUpdate + InplaceRefresh
-T_manager(resume) = sandbox_resume_duration − sandbox_resume_wait = refresh + retryUpdate + InplaceRefresh
-T_manager(claim)  = Total − WaitReady − InitRuntime − CSIMount − SecurityToken = ΣPickAndLock(Total − WaitReady) + Σwait
-T_manager(delete) = sandbox_delete_duration (kill does not wait)
 
-```
+- T_manager(pause)  = `sandbox_pause_duration`  − `sandbox_pause_wait` = `refresh` + `retryUpdate` + `InplaceRefresh`
+  - `sandbox_pause_wait`:
+  - `refresh`
+  - `retryUpdate`
+  - `InplaceRefresh`
+- T_manager(resume) = sandbox_resume_duration − sandbox_resume_wait = refresh + retryUpdate + InplaceRefresh
+- T_manager(claim)  = Total − WaitReady − InitRuntime − CSIMount − SecurityToken = ΣPickAndLock(Total − WaitReady) + Σwait
+- T_manager(delete) = sandbox_delete_duration (kill does not wait)
+
+
 **metrics**: 
 - p50, p90, p95, p99
 - rate(rest_client_request_duration_seconds_sum{verb=~"GET|PUT|PATCH|POST|DELETE"}[5m])/ rate(段_sum[5m])
