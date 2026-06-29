@@ -8,12 +8,14 @@
 
 ## Global Sandboxset Test
 #### method
-#### metrics
+#### metrics(general)
 - speed of creating = rate(`sandboxset_sandboxes_created_total{namespace,name}`)
-- *speed of available/repleshment* = rate(`sandboxset_sandboxes_available_total{namespace, name}`)
-- speed of delete = `sandboxset_sandboxes_deleted_total`(删除/缩容)
+- *speed of available/replenishment* = rate(`sandboxset_sandboxes_available_total{namespace, name}`)
+- gap: `spec.Replicas` - available(gauge)
+- `sandboxset_sandboxes_claimed_total{namespace,name}`
+- `sandboxset_updated_replicas`(gauge)
 - rate of failure: `created_total{result="failure"}` / `created_total`
-- 缺口1: `spec.Replicas` - available(gauge)
+
 
 ## E2E Test(e2b/cr)
 ### tested functions
@@ -31,8 +33,8 @@
 | `CloneSandbox()` | N | Restore + re-init runs in the real pod (stubbed on Kwok); control-plane part ≈ Claim.|
 | `SetTimeout()` | N | Cheap write on the same path as Pause's write.|
 | `ListSandboxes()` | N | Not a main load source; a correctness concern, not a capacity one.|
-| `GetClaimedSandbox()` | N | Single-object cache hit, negligible. |
 | List snapshots / templates / API keys | N | Admin/read endpoints, not hot-path load. |
+| `GetClaimedSandbox()` | N | Single-object cache hit, negligible. |
 
 
 #### e2b
@@ -57,22 +59,30 @@ def measure(op, fn):
 
 ```
 **metrics**: 
-- p50, p90, p95, p99
 - tps
+- p50, p90, p95, p99
 - success count
 - error count(409 conflict / 429 ratelimit / timeout / 500)
 
 #### CR
 
+- batch claim via cr
+  - metrics:
+    - *contention*(core):retry of claim retry / 409 conflict
+        — batch 并联抢同一池子,冲突风暴是核心信号     
+    - convergence(批次收敛):SandboxClaim 创建 → status 到 Completed 的时长
+        + 批次进度 status.UpdatedReplicas/Replicas(已领 / 请求总数)
+    - failure rate: failure count / batch size
+
 - rolling update sandbox in sandboxset(change `SandboxSet spec.template` → UpdateRevision)  
   - metrics:
       - total time
-      - rate(*sandboxset_sandboxes_updated_total{namespace,name}*) 
+      - speed:rate(*sandboxset_sandboxes_updated_total{namespace,name}*) 
 
 - rolling update claimed sandbox(`SandboxUpdateOps` cr), limited by    
    - metrics:
       - total time
-      - speed(rate(`sandbox_inplace_update_duration_seconds_count`)) 
+      - speed: rate(`sandbox_inplace_update_duration_seconds_count`))
 
 
 
@@ -91,9 +101,9 @@ def measure(op, fn):
   - `sandbox_pause_wait`: waiting controller pause sandbox
   - `InplaceRefresh`: read status again and check success
 - T_manager(resume) = sandbox_resume_duration − sandbox_resume_wait = refresh + retryUpdate + InplaceRefresh
-  - `refresh`: read status and make sure pause can be done
-  - `retryUpdate`: write `Spec.Paused=true`
-  - `sandbox_pause_wait`: waiting controller pause sandbox
+  - `refresh`: read status and make sure resume can be done
+  - `retryUpdate`: write `Spec.Paused=false`
+  - `sandbox_pause_wait`: waiting controller resume sandbox
   - `InplaceRefresh`: read status again and check success
 - T_manager(delete) = sandbox_delete_duration (kill does not wait)
 
@@ -126,7 +136,7 @@ def measure(op, fn):
 #### reconcile   
 - p50,p90,p95,p99  
   rate(controller_runtime_reconcile_time_seconds_sum{controller})/rate(..._count{controller})
-- api  
+- apiserver  
   apiserver 占比 ≈ rate(rest_client_request_duration_seconds_sum) / rate(reconcile_time_sum)
 
 #### resource usage
