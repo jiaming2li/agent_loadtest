@@ -80,10 +80,8 @@ def measure(op, fn):
 
 - batch claim via cr
   - metrics:
-    - *contention*(core):retry of claim retry / 409 lock conflict  
     - total time: status.CompletionTime − creationTimestamp
     - process: status.UpdatedReplicas/Replicas
-    - failure rate: failure count / batch size
 
 - rolling update sandbox in sandboxset(change `SandboxSet spec.template` → UpdateRevision)  
   - metrics:
