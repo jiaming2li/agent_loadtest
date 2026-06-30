@@ -14,6 +14,8 @@ sandbox churn at the same 100k scale via an open-loop ramp.
 
 ## Global Sandboxset Test
 #### method
+Create a 100k-scale SandboxSet via CR (spec.replicas: 100000) and monitor SandboxSet metrics.
+
 #### metrics(general)
 - speed of creating = rate(`sandboxset_sandboxes_created_total{namespace,name}`)
 - *speed of available/replenishment* = rate(`sandboxset_sandboxes_available_total{namespace, name}`)
@@ -41,6 +43,10 @@ sandbox churn at the same 100k scale via an open-loop ramp.
 | `ListSandboxes()` | N | Not a main load source; a correctness concern, not a capacity one.|
 | List snapshots / templates / API keys | N | Admin/read endpoints, not hot-path load. |
 | `GetClaimedSandbox()` | N | Single-object cache hit, negligible. |
+
+### method
+Drive the tested functions with an open-loop ramp and monitor metrics.
+
 
 
 #### e2b
@@ -94,6 +100,9 @@ def measure(op, fn):
 ## Sandbox-manager test
 
 ### method
+Monitor metrics during test.
+
+### manager-segment latency 
 
 - T_manager(claim)  = Total − WaitReady − InitRuntime − CSIMount − SecurityToken = ΣPickAndLock(Total − WaitReady) + Σwait
     - `wait`: time waiting for claim worker slot
@@ -108,7 +117,7 @@ def measure(op, fn):
 - T_manager(resume) = sandbox_resume_duration − sandbox_resume_wait = refresh + retryUpdate + InplaceRefresh
   - `refresh`: read status and make sure resume can be done
   - `retryUpdate`: write `Spec.Paused=false`
-  - `sandbox_pause_wait`: waiting controller resume sandbox
+  - `sandbox_resume_wait`: waiting controller resume sandbox
   - `InplaceRefresh`: read status again and check success
 - T_manager(delete) = sandbox_delete_duration (kill does not wait)
 
@@ -156,6 +165,7 @@ def measure(op, fn):
 ### k8s side(sandbox level)
 
 ### method
+Monitor metrics during test.
 
 ### metrics
 - `rest_client_rate_limiter_duration_seconds`: manager/controller's QPS/Burst ratelimitter
