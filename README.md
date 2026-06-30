@@ -154,15 +154,14 @@ def measure(op, fn):
 ### metrics
 - `rest_client_rate_limiter_duration_seconds`: manager/controller's QPS/Burst ratelimitter
 - `rest_client_request_duration_seconds{verb,host}`, rtt of rest_client call
-- rest_client_requests_total{verb,code,host} 409 = 锁冲突,429 = APF 限流
+- rest_client_requests_total{verb,code,host} （409, 429(APF ratelimiter)）
 - apiserver_request_duration_seconds
-- apiserver_flowcontrol_*(rejected / waiting)—— APF 拒绝/排队,即 429 的根源
-- etcd_disk_wal_fsync_duration_seconds —— WAL 落盘延迟(写的根瓶颈)
-- etcd_request_duration_seconds —— etcd 操作延迟
-- etcd_db_total_size —
-- apiserver:CPU + 内存
-- etcd:CPU + 内存,但更要紧的是磁盘——etcd 通常先 fsync/磁盘瓶颈,后 CPU。所以这层 etcd_disk_wal_fsync_duration + 磁盘 I/O 的优先级高于 CPU(已有 fsync)
-
+- apiserver_flowcontrol_*(rejected / waiting)—— APF ratelimiter count
+- etcd_disk_wal_fsync_duration_seconds(core) —— time of fsync WAL
+- etcd_request_duration_seconds —— etcd latency
+- etcd_db_total_size 
+- apiserver:CPU + memory
+- etcd: CPU + memory
 
 
 
