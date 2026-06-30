@@ -2,16 +2,15 @@
 
 ## Overview
 #### goal  
-Use **Kwok + kind** to simulate a large-scale cluster and evaluate OpenKruise
-Agents at **100k-sandbox** scale: measure its performance under load, **find the system
-bottleneck** — which of the three layers gives out first: the **sandbox-manager**
-(synchronous E2B API), the **controllers** (asynchronous reconcile), or **k8s**
-(apiserver + etcd) — and **detect performance regressions** against a baseline.
+Use Kwok + kind to simulate a large-scale cluster and evaluate OpenKruise
+Agents at 100k-sandbox scale: measure its performance under load, find the system
+bottleneck and detect performance regressions against a baseline.
 
 
 #### method  
-Stand up a **100k-scale SandboxSet** as the pre-warmed pool, and drive
-**sandbox churn at the same 100k scale** via an **open-loop ramp**.
+Stand up a 100k-scale SandboxSet as the pre-warmed pool, and drive
+sandbox churn at the same 100k scale via an open-loop ramp.  
+**open-loop ramp**: Send requests at a fixed rate (without waiting for responses) and step that rate up notch by notch until the system breaks — used to find the capacity ceiling.
 
 ## Global Sandboxset Test
 #### method
