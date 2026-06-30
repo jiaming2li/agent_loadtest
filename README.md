@@ -1,10 +1,17 @@
 # OKA_KWOK_Loadtest
 
 ## Overview
-开环ramp,100k
-#### goal
-#### method
-#### output
+#### goal  
+Use **Kwok + kind** to simulate a large-scale cluster and evaluate OpenKruise
+Agents at **100k-sandbox** scale: measure its performance under load, **find the system
+bottleneck** — which of the three layers gives out first: the **sandbox-manager**
+(synchronous E2B API), the **controllers** (asynchronous reconcile), or **k8s**
+(apiserver + etcd) — and **detect performance regressions** against a baseline.
+
+
+#### method  
+Stand up a **100k-scale SandboxSet** as the pre-warmed pool, and drive
+**sandbox churn at the same 100k scale** via an **open-loop ramp**.
 
 ## Global Sandboxset Test
 #### method
@@ -109,7 +116,7 @@ def measure(op, fn):
 
 **metrics**: 
 - p50, p90, p95, p99
-- rate(rest_client_request_duration_seconds_sum{verb=~"GET|PUT"}[5m])/rate(rest_client_request_duration_seconds_count{verb=~"GET|PUT"}[5m])
+- rate(rest_client_request_duration_seconds_sum{verb="GET|PUT"}[5m])/rate(rest_client_request_duration_seconds_count{verb="GET|PUT"}[5m])
 - process_cpu: cpu usage
 - go_goroutines: goroutine usage
 - heap: memory usage
