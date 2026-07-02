@@ -80,3 +80,60 @@ r.Delete(pod) 只是告诉 apiserver 要删,真正拆是 kubelet:
 CSI = Container Storage Interface,是 Kubernetes 挂载外部存储的标准插件接口(让各种存储后端——云盘、NFS、对象存储等——能挂进容器)。
 
 csi-sidecar = 沙箱 pod 里一个专门负责挂载存储的辅助容器。
+
+pod的condition=sandbox的condition（ready）
+
+```
+// syncSandboxStatusFromPod updates sandbox status from pod info and syncs the Ready condition
+// with container startup failure detection.
+func syncSandboxStatusFromPod(pod *corev1.Pod, newStatus *agentsv1alpha1.SandboxStatus) {
+	newStatus.NodeName = pod.Spec.NodeName
+	newStatus.SandboxIp = pod.Status.PodIP
+	newStatus.PodInfo = agentsv1alpha1.PodInfo{
+		PodIP:    pod.Status.PodIP,
+		NodeName: pod.Spec.NodeName,
+		PodUID:   pod.UID,
+	}
+	pCond := utils.GetPodCondition(&pod.Status, corev1.PodReady) //从 Pod 的 Status 里查找类型为 PodReady 的那个 condition,取出来赋值给 pCond。
+	cond := utils.GetSandboxCondition(newStatus, string(agentsv1alpha1.SandboxConditionReady))
+	if cond == nil {
+		cond = &metav1.Condition{
+			Type:               string(agentsv1alpha1.SandboxConditionReady),
+			Status:             metav1.ConditionFalse,
+			LastTransitionTime: metav1.Now(),
+			Reason:             agentsv1alpha1.SandboxReadyReasonPodReady,
+		}
+	}
+	if pCond != nil && string(pCond.Status) != string(cond.Status) {
+		cond.Status = metav1.ConditionStatus(pCond.Status)
+		cond.LastTransitionTime = pCond.LastTransitionTime
+		cond.Reason = agentsv1alpha1.SandboxReadyReasonPodReady
+		cond.Message = ""
+	}
+...
+
+	utils.SetSandboxCondition(newStatus, *cond)
+}
+```
+```
+func (r *commonControl) EnsureSandboxRunning(ctx context.Context, args EnsureFuncArgs) (time.Duration, error) {
+	pod, box, newStatus := args.Pod, args.Box, args.NewStatus
+	// If the Pod does not exist, it must first be created.
+	if pod == nil {
+		if requeueAfter, shouldReturn := r.rateLimiter.getRateLimitDuration(ctx, pod, box); shouldReturn {
+			return requeueAfter, nil
+		}
+		_, err := r.createPod(ctx, box, newStatus)
+		return 0, err
+	}
+
+	// pod status running
+	if pod.Status.Phase == corev1.PodRunning {
+		newStatus.Phase = agentsv1alpha1.SandboxRunning
+		syncSandboxStatusFromPod(pod, newStatus)
+		return 0, nil
+	}
+
+	return 0, nil
+}
+```
