@@ -25,6 +25,33 @@ api/v1alpha1/sandboxclaim_types.go:116
 
 `SkipInitRuntime bool json:"skipInitRuntime,omitempty"`
 
+### update
+```
+curl -X POST http://127.0.0.1:8080/sandboxes \
+  -H "Host: api.localhost" -H "X-API-KEY: some-api-key" -H "Content-Type: application/json" \
+  -d '{
+    "templateID": "loadtest",
+    "metadata": {
+      "e2b.agents.kruise.io/skip-init-runtime": "true",
+      "e2b.agents.kruise.io/image": "busybox:1.36",
+      "e2b.agents.kruise.io/cpu-request": "200m",
+      "e2b.agents.kruise.io/cpu-limit": "500m"
+    }
+  }'
+```
+
+```
+create.go:
+  parseExtensionImage (extensions.go:152)     ← 读 metadata["...image"]
+  parseExtensionResources (extensions.go:165) ← 读 cpu-request/cpu-limit
+  → request.Extensions.InplaceUpdate
+create.go:116:
+  if InplaceUpdate.Image != "" || Resources != nil {
+    opts.InplaceUpdate = {Image, Resources}
+  }
+→ claim.go:174 pick 阶段 modifyPickedSandbox 应用 + 走 in-place 更新流程
+```
+
 
 
 
