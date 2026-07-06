@@ -1,4 +1,4 @@
-e2b create.go `createSandboxWithClaim()`
+#### e2b create.go `createSandboxWithClaim()`
 ```
 if !request.Extensions.SkipInitRuntime {
 		opts.InitRuntime = &config.InitRuntimeOptions{
@@ -19,13 +19,13 @@ if opts.InitRuntime != nil {
     }
 }
 ```
-
+#### cr
 api/v1alpha1/sandboxclaim_types.go:116
 
 
 `SkipInitRuntime bool json:"skipInitRuntime,omitempty"`
 
-### update
+### claim_with_update（修改对应spec,等待reconcile）
 ```
 curl -X POST http://127.0.0.1:8080/sandboxes \
   -H "Host: api.localhost" -H "X-API-KEY: some-api-key" -H "Content-Type: application/json" \
@@ -52,6 +52,10 @@ create.go:116:
 → claim.go:174 pick 阶段 modifyPickedSandbox 应用 + 走 in-place 更新流程
 ```
 
+`sandbox_controller.go`:245 : `err = r.getControl(args.Pod).EnsureSandboxUpdated(ctx, args)`
+
+`common_control.go:105`: `EnsureSandboxUpdated()` 
+common_inplace_update_handler.go:49 handleInPlaceUpdateCommon
 
 
 
