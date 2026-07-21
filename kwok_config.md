@@ -42,11 +42,6 @@ if rejected := r.checkpointControl.AssumePodCheckpointed(ctx, pod, box, newStatu
 
 ```
 if err = resumeTask.Wait(resumeWaitMaxTimeout); err != nil {
-		// A canceled request context surfaces here as "client rate limiter Wait
-		// returned an error: context canceled" from client-go, which is misleading:
-		// it is not a throttling failure but a propagation of ctx.Err(). Log it at
-		// Info level so it is not mistaken for a server-side error in metrics or
-		// alerting pipelines that watch klog ERROR.
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			log.Info("stop waiting sandbox resume: request canceled by client (disconnected or client-side timeout)",
 				"err", err, "ctxErr", ctxErr)
@@ -61,20 +56,29 @@ if err = resumeTask.Wait(resumeWaitMaxTimeout); err != nil {
 
 
 #### Controller side   
-`spec.Paused=false` 触发 reconcile:`common_control.go: EnsureSandboxPaused(), 249-299`
+`spec.Paused=false` 触发 reconcile:`common_control.go: EnsureSandboxResumed(), 249-299`
 
 
 ```
-if rejected := r.checkpointControl.AssumePodCheckpointed(ctx, pod, box, newStatus, cond); rejected {
-		return nil
+var err error
+	if pod == nil {
+		delta := r.checkpointControl.GetPodTemplateDelta(ctx, box)
+		_, err = r.podControl.CreatePod(ctx, CreatePodArgs{Box: box, NewStatus: newStatus, PodTemplateDelta: delta})
+		return err
 	}
-
-	err := client.IgnoreNotFound(r.Delete(ctx, pod, &client.DeleteOptions{GracePeriodSeconds: ptr.To(int64(5))}))
-	if err != nil {
 ```
-- r.Delete()
-- 假 pod 要有真实的 containerStatuses(imageID),否则 AssumePodCheckpointed 可能记录不全。别在 kwok 上开 SandboxPauseCheckpoint(Alpha,默认关)
 
+```
+utils.SetSandboxCondition(newStatus, metav1.Condition{
+			Type:               string(agentsv1alpha1.RuntimeInitialized),
+			Status:             metav1.ConditionFalse,
+			Reason:             agentsv1alpha1.SandboxConditionRuntimeInitReasonPending,
+			Message:            "Waiting for pod ready before initialization",
+			LastTransitionTime: metav1.Now(),
+		})
+```
+- 
+- 
 
 
 ### Claim
