@@ -1,5 +1,5 @@
 
-### Pause
+## Pause
 
 #### Manager side
 `sandbox.go:311-364`
@@ -35,7 +35,7 @@ if err != nil {
 
 
 
-### Resume
+## Resume
 
 #### Manager side
 `sandbox.go:373-461`
@@ -87,18 +87,6 @@ if pod.Status.Phase == corev1.PodRunning && isContainersConsistent(pod, box) {}
 		}
 	}
 
-	// For non-Recreate upgrade policy (e.g., sandbox-manager triggered inplace update via annotation),
-	// perform inplace update directly without entering the full upgrade lifecycle (PreUpgrade -> UpgradePod -> PostUpgrade).
-	if box.Spec.UpgradePolicy == nil || box.Spec.UpgradePolicy.Type != agentsv1alpha1.SandboxUpgradePolicyRecreate {
-		done, err := r.handleInplaceUpdateSandbox(ctx, args)
-		if err != nil {
-			return err
-		} else if !done {
-			return nil
-		}
-	}
-	syncSandboxStatusFromPod(pod, newStatus)
-	return nil
 ```
 sandbox_initializer.go:46-79:
 ① 设 Pending：真（status 写）
@@ -111,7 +99,7 @@ sandbox_initializer.go:46-79:
   
 
 
-### Claim
+## Claim
 
 
-### Inplace-update
+## Inplace-update
