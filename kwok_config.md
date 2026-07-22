@@ -1,30 +1,24 @@
 
-## Pause
-
-#### Manager side
-`sandbox.go:311-364`
-
-```
-if err = pauseTask.Wait(time.Minute); err != nil {
-	log.Error(err, "failed to wait sandbox pause")
-	return err
-}
-```
-`pauseTask.Wait(time.Minute)`: 等待sandbox到达 paused 状态(SandboxPaused 条件=True / phase=Paused)（最多 1min）
-
-
-
-#### Controller side   
-`spec.Paused=true` 触发 reconcile:`common_control.go: EnsureSandboxPaused(), 191-247`
+### Pause
+  
+manager changing `spec.Paused=true` invoke reconcile:`common_control.go: EnsureSandboxPaused(), 191-247`
 
 
 ```
 if rejected := r.checkpointControl.AssumePodCheckpointed(ctx, pod, box, newStatus, cond); rejected {
 	return nil
-}
+} //删 pod 前先确保 pod 已 checkpoint
 
 err := client.IgnoreNotFound(r.Delete(ctx, pod, &client.DeleteOptions{GracePeriodSeconds: ptr.To(int64(5))}))
 if err != nil {
+```
+
+```
+func (c *CheckpointControl) AssumePodCheckpointed(ctx context.Context, pod *corev1.Pod, box *agentsv1alpha1.Sandbox, newStatus *agentsv1alpha1.SandboxStatus, cond *metav1.Condition) bool {
+	if !utilfeature.DefaultFeatureGate.Enabled(features.SandboxPauseCheckpointGate) {
+	//SandboxPauseCheckpoint 通过 agent-sandbox-controller 的 --feature-
+		return false
+	}
 ```
 - r.Delete()
 - 假 pod 要有真实的 containerStatuses(imageID),否则 AssumePodCheckpointed 可能记录不全。别在 kwok 上开 SandboxPauseCheckpoint(Alpha,默认关)
@@ -35,71 +29,59 @@ if err != nil {
 
 
 
-## Resume
-
-#### Manager side
-`sandbox.go:373-461`
-
-```
-if err = resumeTask.Wait(resumeWaitMaxTimeout); err != nil {
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		log.Info("stop waiting sandbox resume: request canceled by client (disconnected or client-side timeout)",
-			"err", err, "ctxErr", ctxErr)
-		return err
-	}
-	log.Error(err, "failed to wait sandbox resume")
-	return err
-}
-```
-`resumeTask.Wait(resumeWaitMaxTimeout)`: 等待sandbox到达 running 状态(resume = 重建 pod + 等 ready + 重做 runtime/CSptrI 初始化)（最多 1min）
-
-
-
-#### Controller side   
-`spec.Paused=false` 触发 reconcile:`common_control.go: EnsureSandboxResumed(), 249-299`
-
+### Resume
+  
+manager changing `spec.Paused=false` invoke reconcile:`common_control.go: EnsureSandboxResumed(), 249-299`
 
 ```
-var err error
 if pod == nil {
 	delta := r.checkpointControl.GetPodTemplateDelta(ctx, box)
 	_, err = r.podControl.CreatePod(ctx, CreatePodArgs{Box: box, NewStatus: newStatus, PodTemplateDelta: delta})
 	return err
 }
-
-if pod.Status.Phase == corev1.PodRunning && isContainersConsistent(pod, box) {}
 ```
 
 - pod phase 变 running → EnsureSandboxResumed(267 行)→ sandbox phase=Running + RuntimeInitialized=Pending
 - pod condition 变 Ready(容器通过 readiness probe) → 【Pod update 事件】→ sandbox reconcile → EnsureSandboxUpdated：pod ready → Initialize → RuntimeInitialized=True
 
 ```
-// If RuntimeInitialized is pending (set during resume), wait for Pod Ready then run Initialize
-	initCond := utils.GetSandboxCondition(newStatus, string(agentsv1alpha1.RuntimeInitialized))
-	if initCond != nil && initCond.Status != metav1.ConditionTrue {
-		pCond := utils.GetPodCondition(&pod.Status, corev1.PodReady)
-		if pCond == nil || pCond.Status != corev1.ConditionTrue {
-			klog.InfoS("Waiting for pod ready before initialization", "sandbox", klog.KObj(box))
-			return nil
-		}
-		if err := r.initializer.Initialize(ctx, box, newStatus); err != nil {
-			return err
-		}
+if initCond != nil && initCond.Status != metav1.ConditionTrue {#RuntimeInitialized=Pending
+	if err := r.initializer.Initialize(ctx, box, newStatus); err != nil {
+		return err
 	}
-
+}
 ```
-sandbox_initializer.go:46-79:
-① 设 Pending：真（status 写）
-② 等 Pod Ready：kwok stage 设 PodReady=True → 满足
-③ Initialize：
+
+solutions:
+- 等 Pod Ready：kwok stage 设 PodReady=True → 满足
+
+③ Initialize(sandbox_initializer.go:46-79)
    - 无 runtime/CSI 注解（skip-init-runtime claim）→ reinitRuntime no-op、CSI 跳过
      → 直接 RuntimeInitialized=True → 通 ✅
    - 有注解 → 连 envd/CSI → kwok 做不了 → Failed → 卡 ❌
 
-  
+```
+if len(csiMountConfigRequests) != 0 {
+	duration, mountErr := utilruntime.ProcessCSIMounts(ctx, sbxForInit, config.CSIMountOptions{
+	})
+}
+```
+```
+if initRuntimeOpts != nil {
+	if _, err = utilruntime.InitRuntime(ctx, sbxForInit, *initRuntimeOpts, nil); err != nil {
+	}
+}
+```
+
+```
+if !identity.IsIdentityProviderRequested(sbxForInit) {
+	return nil
+}
+```
 
 
-## Claim
+### Claim
+
 `pkg/sandbox-manager/infra/sandboxcr/claim.go`: `runClaimPostProcesses()`
 
 ```
@@ -114,12 +96,20 @@ if identity.IsIdentityProviderRequested(sbx.Sandbox) {
 if opts.CSIMount != nil {
 	metrics.CSIMount, err = runtime.ProcessCSIMounts(ctx, sbx.Sandbox, *opts.CSIMount)
 }
+```
 
+solution:
+
+```
+if !request.Extensions.SkipInitRuntime {
+	infraOpts.InitRuntime = &config.InitRuntimeOptions{
+	}
+}
 ```
 
 
-## Inplace-update
-`.spec.template.spec.containers[].image` change invoke `pkg/controller/sandbox/core/common_inplace_update_handler.go`:``
+### Inplace-update
+`.spec.template.spec.containers[].image` change invoke `pkg/controller/sandbox/core/common_inplace_update_handler.go`:
 ```
 control := handler.GetInPlaceUpdateControl()
 changed, err := control.Update(ctx, opts)
@@ -130,8 +120,7 @@ type InPlaceUpdateControl struct {
     generatePatchBodyFunc GeneratePatchBodyFunc  // 生成 image/metadata 的 patch body
     useDirectResourcePatch atomic.Bool     // K8s<1.33 无 resize 子资源时的兼容 fallback
 }
-
 ```
 
-## Rolling update
+### Rolling update
 delete+create
