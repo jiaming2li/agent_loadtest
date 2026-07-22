@@ -100,6 +100,38 @@ sandbox_initializer.go:46-79:
 
 
 ## Claim
+`pkg/sandbox-manager/infra/sandboxcr/claim.go`: `runClaimPostProcesses()`
+
+```
+if opts.InitRuntime != nil {		
+	metrics.InitRuntime, err = runtime.InitRuntime(ctx, sbx.Sandbox, *opts.InitRuntime, sbx.refreshFunc())
+}
+
+if identity.IsIdentityProviderRequested(sbx.Sandbox) {
+	metrics.SecurityToken, err = identity.ProcessSandboxToken(ctx, cache.GetClient(), sbx.Sandbox)
+}
+
+if opts.CSIMount != nil {
+	metrics.CSIMount, err = runtime.ProcessCSIMounts(ctx, sbx.Sandbox, *opts.CSIMount)
+}
+
+```
 
 
 ## Inplace-update
+`.spec.template.spec.containers[].image` change invoke `pkg/controller/sandbox/core/common_inplace_update_handler.go`:``
+```
+control := handler.GetInPlaceUpdateControl()
+changed, err := control.Update(ctx, opts)
+```
+```
+type InPlaceUpdateControl struct {
+    client.Client                          // ← embed k8s 客户端（访问 apiserver）
+    generatePatchBodyFunc GeneratePatchBodyFunc  // 生成 image/metadata 的 patch body
+    useDirectResourcePatch atomic.Bool     // K8s<1.33 无 resize 子资源时的兼容 fallback
+}
+
+```
+
+## Rolling update
+delete+create
