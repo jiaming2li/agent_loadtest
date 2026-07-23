@@ -76,7 +76,7 @@ in-place-update Stage fakes the kubelet by flipping imageID to a sentinel once a
 
 
 ## Rolling update
-delete+create
+batch delete+create, similar to `pause` and `resume`
 
 
 ## Pause
@@ -110,7 +110,7 @@ potential blocking:
 
 solution:
 - keep `SandboxPauseCheckpoint` as default(false)
-- pod-delete Stage:`selector`: `deletionTimestamp` Exists(match deleting pod)+ next: { delete: true }(remove pod), add delay(`durationMilliseconds` + `jitterDurationMilliseconds`,如 3~6s) simulate graceshutting and processing time.
+- pod-delete Stage:`selector`: `deletionTimestamp` Exists(match deleting pod)+ next: { delete: true }(let kwok-controller send apiserver DELETE, apiserver remove pod from etcd), add delay(`durationMilliseconds` + `jitterDurationMilliseconds`,如 3~6s) simulate graceshutting and processing time.
 
 
 
@@ -125,9 +125,9 @@ if pod == nil {
 	return err
 }
 ```
-
-- pod phase 变 running → EnsureSandboxResumed(267 行)→ sandbox phase=Running + RuntimeInitialized=Pending
-- pod condition 变 Ready(容器通过 readiness probe) → 【Pod update 事件】→ sandbox reconcile → EnsureSandboxUpdated：pod ready → Initialize → RuntimeInitialized=True
+- call apiserver create pod: apiserver write into etcd → kube-scheduler find a node → kubelete pull image, build container, run readiness probe → APIserver write status running and condition ready
+- pod phase becomes running → EnsureSandboxResumed(267)→ sandbox phase=Running + RuntimeInitialized=Pending
+- pod condition become Ready(container pass readiness probe) → Pod update event → sandbox reconcile → EnsureSandboxUpdated：pod ready → Initialize → RuntimeInitialized=True
 
 ```
 if initCond != nil && initCond.Status != metav1.ConditionTrue {#RuntimeInitialized=Pending
@@ -137,29 +137,24 @@ if initCond != nil && initCond.Status != metav1.ConditionTrue {#RuntimeInitializ
 }
 ```
 
-solutions:
-- 等 Pod Ready：kwok stage 设 PodReady=True → 满足
-
-③ Initialize(sandbox_initializer.go:46-79)
-   - 无 runtime/CSI 注解（skip-init-runtime claim）→ reinitRuntime no-op、CSI 跳过
-     → 直接 RuntimeInitialized=True → 通 ✅
-   - 有注解 → 连 envd/CSI → kwok 做不了 → Failed → 卡 ❌
-
 ```
 if len(csiMountConfigRequests) != 0 {
 	duration, mountErr := utilruntime.ProcessCSIMounts(ctx, sbxForInit, config.CSIMountOptions{
 	})
 }
-```
-```
+
 if initRuntimeOpts != nil {
 	if _, err = utilruntime.InitRuntime(ctx, sbxForInit, *initRuntimeOpts, nil); err != nil {
 	}
 }
-```
 
-```
 if !identity.IsIdentityProviderRequested(sbxForInit) {
 	return nil
 }
 ```
+
+solutions:
+- 等 Pod Ready：kwok stage 设 PodReady=True → 满足
+- keeps `e2b.agents.kruise.io/skip-init-runtime": "true`; avoid adding CSI metadata and identity; keeps `SecurityIdentityProvider` as deflaut to avoid InitRuntime, SecurityToken and CSI processing.
+
+
