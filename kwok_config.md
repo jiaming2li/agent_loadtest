@@ -154,7 +154,7 @@ if !identity.IsIdentityProviderRequested(sbxForInit) {
 ```
 
 solutions:
-- 等 Pod Ready：kwok stage 设 PodReady=True → 满足
+- kwok call APIserver write status running and condition ready
 - keeps `e2b.agents.kruise.io/skip-init-runtime": "true`; avoid adding CSI metadata and identity; keeps `SecurityIdentityProvider` as deflaut to avoid InitRuntime, SecurityToken and CSI processing.
 
 
