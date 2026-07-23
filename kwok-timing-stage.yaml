@@ -1,0 +1,258 @@
+# Kwok Stages for realistic control-plane load testing.
+#
+# 每个 pod 生命周期阶段都带：延迟(delay) + 抖动(jitter) + 概率失败(weight 分流)。
+# 覆盖 pod 启动(pod-ready)、删除(pod-delete)、原地更新(pod-inplace-update)。
+#
+# 用法：
+#   kubectl apply -f test/loadtest/kwok-timing-stages.yaml
+#
+# 约定：
+#   - 沙箱容器名为 "sandbox"（selector 里用 select(.name == "sandbox")）。
+#   - 成功/失败用【同名或同 selector + weight】分流：weight 9 : 1 ≈ 10% 失败。
+#   - 失败会污染成功率/RPS —— 测【容量/吞吐】时把失败 weight 调 0 或删掉失败 stage；
+#     测【健壮性/失败处理】时才保留失败。
+#
+# ⚠️ 重要：
+#   - pod-ready / pod-ready-fail 覆盖了 kwok 默认 pod-ready。podIP 用了静态占位值
+#     （沙箱只要 PodIP != "" 就算有 IP；kwok pod 无真实网络，静态值够用）。apply 后务必
+#     验证沙箱能变 Ready（见文件末尾"验证"）。
+#   - pod-delete-fail（卡 Terminating）默认注释掉：它会让那些 pod 永不消失，
+#     导致 pause/delete 卡住，一般不需要，仅测"删除卡住"时才启用。
+
+# ══════════════════════════════════════════════════════════════
+# 1) POD 启动：pod-ready（成功） + pod-ready-fail（失败：ImagePullBackOff）
+# ══════════════════════════════════════════════════════════════
+---
+apiVersion: kwok.x-k8s.io/v1alpha1
+kind: Stage
+metadata:
+  name: pod-ready
+spec:
+  resourceRef:
+    apiGroup: v1
+    kind: Pod
+  selector:
+    matchExpressions:
+      - key: '.metadata.deletionTimestamp'
+        operator: DoesNotExist
+      - key: '.status.phase'
+        operator: In
+        values: ["Pending"]                 # 还没起来的
+      - key: '.spec.nodeName'
+        operator: NotIn
+        values: [""]                         # 已被调度到节点
+      # 防止把"已判失败(ImagePullBackOff)"的 pod 又救成成功
+      - key: '.status.containerStatuses.[] | select(.name == "sandbox") | .state.waiting.reason'
+        operator: NotIn
+        values: ["ImagePullBackOff"]
+  delay:
+    durationMilliseconds: 5000               # 基础 5s（拉镜像+启动）
+    jitterDurationMilliseconds: 12000        # 实际 5~12s 随机
+  next:
+    statusSubresource: status
+    statusTemplate: |
+      {{ $now := Now }}
+      phase: Running
+      hostIP: "10.0.0.1"
+      podIP: "10.244.0.1"                    # ⚠️ 静态占位（沙箱只需非空 IP）
+      conditions:
+      - { type: Initialized,   status: "True",  lastTransitionTime: {{ $now | Quote }} }
+      - { type: Ready,         status: "True",  lastTransitionTime: {{ $now | Quote }} }
+      - { type: ContainersReady, status: "True", lastTransitionTime: {{ $now | Quote }} }
+      - { type: PodScheduled,  status: "True",  lastTransitionTime: {{ $now | Quote }} }
+      containerStatuses:
+      {{ range .spec.containers }}
+      - name: {{ .name | Quote }}
+        image: {{ .image | Quote }}
+        imageID: {{ .image | Quote }}
+        ready: true
+        started: true
+        restartCount: 0
+        state: { running: { startedAt: {{ $now | Quote }} } }
+      {{ end }}
+  weight: 9                                  # ~90% 成功
+---
+apiVersion: kwok.x-k8s.io/v1alpha1
+kind: Stage
+metadata:
+  name: pod-ready-fail
+spec:
+  resourceRef:
+    apiGroup: v1
+    kind: Pod
+  selector:
+    matchExpressions:
+      - key: '.metadata.deletionTimestamp'
+        operator: DoesNotExist
+      - key: '.status.phase'
+        operator: In
+        values: ["Pending"]
+      - key: '.spec.nodeName'
+        operator: NotIn
+        values: [""]
+      - key: '.status.containerStatuses.[] | select(.name == "sandbox") | .state.waiting.reason'
+        operator: NotIn
+        values: ["ImagePullBackOff"]         # 防重复触发
+  delay:
+    durationMilliseconds: 5000
+    jitterDurationMilliseconds: 12000
+  next:
+    statusSubresource: status
+    statusTemplate: |
+      {{ $now := Now }}
+      phase: Pending
+      conditions:
+      - { type: Ready, status: "False", reason: "ContainersNotReady", lastTransitionTime: {{ $now | Quote }} }
+      containerStatuses:
+      {{ range .spec.containers }}
+      - name: {{ .name | Quote }}
+        image: {{ .image | Quote }}
+        ready: false
+        started: false
+        restartCount: 0
+        state:
+          waiting:
+            reason: "ImagePullBackOff"
+            message: "simulated image pull failure"
+      {{ end }}
+  weight: 1                                  # ~10% 启动失败
+
+# ══════════════════════════════════════════════════════════════
+# 2) POD 删除：pod-delete（成功，真实 grace） + （可选）卡 Terminating
+# ══════════════════════════════════════════════════════════════
+---
+apiVersion: kwok.x-k8s.io/v1alpha1
+kind: Stage
+metadata:
+  name: pod-delete
+spec:
+  resourceRef:
+    apiGroup: v1
+    kind: Pod
+  selector:
+    matchExpressions:
+      - key: '.metadata.deletionTimestamp'
+        operator: Exists                     # 正在删除
+  delay:
+    durationFrom:
+      expressionFrom: '.metadata.deletionTimestamp'   # 锚定到被删时刻
+    durationMilliseconds: 5000               # +5s grace
+    jitterDurationMilliseconds: 10000        # 实际 5~10s 随机
+  next:
+    delete: true                             # 移除 pod
+  weight: 0
+
+# ── （可选）删除失败：卡 Terminating ──
+# ⚠️ 启用后 ~10% 的 pod 被删后【永不消失】，会让 pause/delete 卡住。
+#    一般不要开；仅测"删除卡住/finalizer 卡住"时启用（把上面 pod-delete 加 weight: 9，
+#    并取消下面注释、给它 weight: 1，两者同 selector 按权重分流）。
+# ---
+# apiVersion: kwok.x-k8s.io/v1alpha1
+# kind: Stage
+# metadata:
+#   name: pod-delete-stuck
+# spec:
+#   resourceRef: { apiGroup: v1, kind: Pod }
+#   selector:
+#     matchExpressions:
+#       - key: '.metadata.deletionTimestamp'
+#         operator: Exists
+#   delay:
+#     durationMilliseconds: 5000
+#   next:
+#     statusSubresource: status
+#     statusTemplate: |                       # 只标记，不 delete → 卡 Terminating
+#       reason: "SimulatedStuckTerminating"
+#   weight: 1
+
+# ══════════════════════════════════════════════════════════════
+# 3) 原地更新：pod-inplace-update-complete（成功） + fail（ImagePullBackOff）
+# ══════════════════════════════════════════════════════════════
+---
+apiVersion: kwok.x-k8s.io/v1alpha1
+kind: Stage
+metadata:
+  name: pod-inplace-update-complete
+spec:
+  resourceRef:
+    apiGroup: v1
+    kind: Pod
+  selector:
+    matchExpressions:
+      - key: '.metadata.deletionTimestamp'
+        operator: DoesNotExist
+      - key: '.metadata.annotations["agents.kruise.io/inplace-update-state"]'
+        operator: Exists                     # 正在原地更新
+      - key: '.status.containerStatuses.[] | select(.name == "sandbox") | .imageID'
+        operator: NotIn
+        values: ["kwok://inplace-updated"]   # 还没被标记完成
+      - key: '.status.containerStatuses.[] | select(.name == "sandbox") | .state.waiting.reason'
+        operator: NotIn
+        values: ["ImagePullBackOff"]         # 已失败的不救回
+  delay:
+    durationMilliseconds: 5000               # 拉新镜像+重启 5~12s
+    jitterDurationMilliseconds: 12000
+  next:
+    statusSubresource: status
+    statusTemplate: |
+      {{ $now := Now }}
+      containerStatuses:
+      {{ range .spec.containers }}
+      - name: {{ .name | Quote }}
+        image: {{ .image | Quote }}
+        imageID: "kwok://inplace-updated"    # imageID 变 → 判定完成
+        ready: true
+        started: true
+        restartCount: 1
+        state: { running: { startedAt: {{ $now | Quote }} } }
+      {{ end }}
+  weight: 9                                  # ~90% 更新成功
+---
+apiVersion: kwok.x-k8s.io/v1alpha1
+kind: Stage
+metadata:
+  name: pod-inplace-update-fail
+spec:
+  resourceRef:
+    apiGroup: v1
+    kind: Pod
+  selector:
+    matchExpressions:
+      - key: '.metadata.deletionTimestamp'
+        operator: DoesNotExist
+      - key: '.metadata.annotations["agents.kruise.io/inplace-update-state"]'
+        operator: Exists
+      - key: '.status.containerStatuses.[] | select(.name == "sandbox") | .imageID'
+        operator: NotIn
+        values: ["kwok://inplace-updated"]
+      - key: '.status.containerStatuses.[] | select(.name == "sandbox") | .state.waiting.reason'
+        operator: NotIn
+        values: ["ImagePullBackOff"]         # 防重复触发
+  delay:
+    durationMilliseconds: 5000
+    jitterDurationMilliseconds: 12000
+  next:
+    statusSubresource: status
+    statusTemplate: |
+      {{ range .spec.containers }}
+      - name: {{ .name | Quote }}
+        image: {{ .image | Quote }}
+        # ⚠️ 不改 imageID（保持旧值）→ IsInplaceUpdateCompleted 判"没完成" = 真失败
+        ready: false
+        state:
+          waiting:
+            reason: "ImagePullBackOff"
+            message: "simulated in-place update image pull failure"
+      {{ end }}
+  weight: 1                                  # ~10% 更新失败
+
+# ══════════════════════════════════════════════════════════════
+# 验证（apply 后）
+#   1) 建一个沙箱，看它能否变 Ready 且有 podIP：
+#        kubectl get sbx <name> -o custom-columns=\
+#          'NAME:.metadata.name,READY:.status.conditions[?(@.type=="Ready")].status,IP:.status.sandboxIp'
+#      READY=True、IP 非空 → pod-ready 成功路径 OK。
+#   2) 删一个 pod，确认 5~10s 后才消失（不是瞬间）：
+#        kubectl delete pod <name>; watch kubectl get pod <name>
+#   3) 若测容量/吞吐：把三个 *-fail 的 weight 设 0（或删掉），避免失败污染指标。
+# ══════════════════════════════════════════════════════════════
