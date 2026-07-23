@@ -23,8 +23,7 @@ InitRuntime, process SecurityToken and CSI are all operated in real pod.
 
 solution:
 
-sets `e2b.agents.kruise.io/skip-init-runtime": "true`; avoid adding CSI metadata and identity; keeps `SecurityIdentityProvider` as deflaut
-to avoid InitRuntime, SecurityToken and CSI processing.
+sets `e2b.agents.kruise.io/skip-init-runtime": "true`; avoid adding CSI metadata and identity; keeps `SecurityIdentityProvider` as deflaut(false).
 
 - cr:
 ```
@@ -37,14 +36,12 @@ spec:
   templateName:
   replicas: 100
   skipInitRuntime: true
-  createOnNoStock: true        # 可选：池子空时补建
+  createOnNoStock: true        # optional：create new sdx when pool is empty
 ```
 - E2B:
 ```
 META = {
     "e2b.agents.kruise.io/skip-init-runtime": "true",
-    "e2b.agents.kruise.io/claim-timeout-seconds": "8",
-    "e2b.agents.kruise.io/wait-ready-timeout-seconds": "5",
 }
 
 sbx = Sandbox.create(template=TEMPLATE, timeout=60, request_timeout=25, metadata=META)
@@ -60,9 +57,9 @@ changed, err := control.Update(ctx, opts)
 ```
 ```
 type InPlaceUpdateControl struct {
-    client.Client                          // ← embed k8s 客户端（访问 apiserver）
-    generatePatchBodyFunc GeneratePatchBodyFunc  // 生成 image/metadata 的 patch body
-    useDirectResourcePatch atomic.Bool     // K8s<1.33 无 resize 子资源时的兼容 fallback
+    client.Client                          // ← embed k8s client（visit apiserver）
+    generatePatchBodyFunc GeneratePatchBodyFunc  // generate image/metadata patch body
+    useDirectResourcePatch atomic.Bool     
 }
 ```
 
