@@ -1,5 +1,5 @@
 
-### Claim
+## Claim
 
 potential blocking:
 
@@ -52,7 +52,7 @@ sbx = Sandbox.create(template=TEMPLATE, timeout=60, request_timeout=25, metadata
 
 
 
-### Inplace-update
+## Inplace-update
 `.spec.template.spec.containers[].image` changing invokes `pkg/controller/sandbox/core/common_inplace_update_handler.go`:
 ```
 control := handler.GetInPlaceUpdateControl()
@@ -72,13 +72,14 @@ potential blocking:
 
 solution:
 
+in-place-update Stage fakes the kubelet by flipping imageID to a sentinel once a pod is being in-place-updated. Add `delay` + `jitterDurationMilliseconds` for realistic pull/restart timing; add a second, weighted Stage that sets `ImagePullBackOff` and keeps imageID unchanged (with a waiting-reason exclusion on both Stages to prevent re-firing) to model a failure rate. 
 
 
-### Rolling update
+## Rolling update
 delete+create
 
 
-### Pause
+## Pause
   
 manager changing `spec.Paused=true` invoke reconcile:`common_control.go: EnsureSandboxPaused(), 191-247`
 
@@ -87,7 +88,9 @@ manager changing `spec.Paused=true` invoke reconcile:`common_control.go: EnsureS
 if rejected := r.checkpointControl.AssumePodCheckpointed(ctx, pod, box, newStatus, cond); rejected {
 	return nil
 } //删 pod 前先确保 pod 已 checkpoint
+```
 
+```
 err := client.IgnoreNotFound(r.Delete(ctx, pod, &client.DeleteOptions{GracePeriodSeconds: ptr.To(int64(5))}))
 if err != nil {
 ```
@@ -99,16 +102,19 @@ func (c *CheckpointControl) AssumePodCheckpointed(ctx context.Context, pod *core
 		return false
 	}
 ```
-- r.Delete()
-- 假 pod 要有真实的 containerStatuses(imageID),否则 AssumePodCheckpointed 可能记录不全。别在 kwok 上开 SandboxPauseCheckpoint(Alpha,默认关)
+
+potential blocking:
+
+- making Checkpoint needs real pod.
+- `r.Delete()`, apiserver set pod `deletionTimestamp`，kubelet watch `deletionTimestamp`, stop container, apiserver remove pod obj from etcd.
+
+solution:
+- keep `SandboxPauseCheckpoint` as default(false)
+- pod-delete Stage:`selector`: `deletionTimestamp` Exists(match deleting pod)+ next: { delete: true }(remove pod), add delay(`durationMilliseconds` + `jitterDurationMilliseconds`,如 3~6s) simulate graceshutting and processing time.
 
 
-4. 下次 reconcile：pod == nil → Paused 条件 = True(reason=DeletePod)
-     → phase = Paused，完成
 
-
-
-### Resume
+## Resume
   
 manager changing `spec.Paused=false` invoke reconcile:`common_control.go: EnsureSandboxResumed(), 249-299`
 
