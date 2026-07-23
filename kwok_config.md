@@ -18,10 +18,13 @@ if opts.CSIMount != nil {
 	metrics.CSIMount, err = runtime.ProcessCSIMounts(ctx, sbx.Sandbox, *opts.CSIMount)
 }
 ```
+InitRuntime, process SecurityToken and CSI are all operated in real pod.
+
 
 solution:
 
-sets `e2b.agents.kruise.io/skip-init-runtime": "true`; avoid adding CSI metadata; keeps `--feature-gates=SecurityIdentityProvider=true`
+sets `e2b.agents.kruise.io/skip-init-runtime": "true`; avoid adding CSI metadata and identity; keeps `SecurityIdentityProvider` as deflaut
+to avoid InitRuntime, SecurityToken and CSI processing.
 
 - cr:
 ```
@@ -31,7 +34,7 @@ metadata:
   name: batch-claim
   namespace: default
 spec:
-  templateName: <你的模板>
+  templateName:
   replicas: 100
   skipInitRuntime: true
   createOnNoStock: true        # 可选：池子空时补建
@@ -64,6 +67,8 @@ type InPlaceUpdateControl struct {
 ```
 
 potential blocking:
+
+`control.Update` asks apiserver to change `spec.image`(+hash); kubelet watches the change, pull new image, restart container and write `imageID` back. There is no kubelet in fake node.
 
 solution:
 
