@@ -65,11 +65,11 @@ type InPlaceUpdateControl struct {
 
 potential blocking:
 
-`control.Update` asks apiserver to change `spec.image`(+hash); kubelet watches the change, pull new image, restart container and write `imageID` back. There is no kubelet in fake node.
+`control.Update` call apiserver to change `spec.image`(+hash); kubelet watches the change, pull new image, restart container and write `imageID` back. 
 
 solution:
 
-in-place-update Stage fakes the kubelet by flipping imageID to a sentinel once a pod is being in-place-updated. Add `delay` + `jitterDurationMilliseconds` for realistic pull/restart timing; add a second, weighted Stage that sets `ImagePullBackOff` and keeps imageID unchanged (with a waiting-reason exclusion on both Stages to prevent re-firing) to model a failure rate. 
+Stage fakes kubelet by calling apiserver to change `status.imageID`  as 你的 controller 的完成判定(IsInplaceUpdateCompleted 那套)就是靠"status.imageID 变没变"来确认升级真的生效了。
 
 
 ## Rolling update
@@ -84,7 +84,12 @@ manager changing `spec.Paused=true` invoke reconcile:`common_control.go: EnsureS
 ```
 if rejected := r.checkpointControl.AssumePodCheckpointed(ctx, pod, box, newStatus, cond); rejected {
 	return nil
-} //删 pod 前先确保 pod 已 checkpoint
+} //before deleting pod, make usre pod checkpointed
+
+func (c *CheckpointControl) AssumePodCheckpointed() bool {
+	if !utilfeature.DefaultFeatureGate.Enabled(features.SandboxPauseCheckpointGate) {
+		return false
+	}
 ```
 
 ```
@@ -92,22 +97,15 @@ err := client.IgnoreNotFound(r.Delete(ctx, pod, &client.DeleteOptions{GracePerio
 if err != nil {
 ```
 
-```
-func (c *CheckpointControl) AssumePodCheckpointed(ctx context.Context, pod *corev1.Pod, box *agentsv1alpha1.Sandbox, newStatus *agentsv1alpha1.SandboxStatus, cond *metav1.Condition) bool {
-	if !utilfeature.DefaultFeatureGate.Enabled(features.SandboxPauseCheckpointGate) {
-	//SandboxPauseCheckpoint 通过 agent-sandbox-controller 的 --feature-
-		return false
-	}
-```
 
 potential blocking:
 
 - making Checkpoint needs real pod.
-- `r.Delete()`, apiserver set pod `deletionTimestamp`，kubelet watch `deletionTimestamp`, stop container, apiserver remove pod obj from etcd.
+- `r.Delete()`, apiserver set pod `deletionTimestamp`，kubelet watch `deletionTimestamp`, stop container, call apiserver remove pod obj from etcd.
 
 solution:
 - keep `SandboxPauseCheckpoint` as default(false)
-- pod-delete Stage:`selector`: `deletionTimestamp` Exists(match deleting pod)+ next: { delete: true }(let kwok-controller send apiserver DELETE, apiserver remove pod from etcd), add delay(`durationMilliseconds` + `jitterDurationMilliseconds`,如 3~6s) simulate graceshutting and processing time.
+- pod-delete Stage:`selector`: `deletionTimestamp` Exists(match deleting pod)+ next: { delete: true }(let kwok-controller send apiserver DELETE, apiserver remove pod from etcd).
 
 
 
@@ -122,7 +120,7 @@ if pod == nil {
 	return err
 }
 ```
-- call apiserver create pod: apiserver write into etcd → kube-scheduler find a node → kubelete pull image, build container, run readiness probe → APIserver write status running and condition ready
+- call apiserver create pod: apiserver write into etcd → kube-scheduler find a node → node's kubelet pull image, build container, run readiness probe(in kubelet) → APIserver write status running and condition ready
 - pod phase becomes running → EnsureSandboxResumed(267)→ sandbox phase=Running + RuntimeInitialized=Pending
 - pod condition become Ready(container pass readiness probe) → Pod update event → sandbox reconcile → EnsureSandboxUpdated：pod ready → Initialize → RuntimeInitialized=True
 
