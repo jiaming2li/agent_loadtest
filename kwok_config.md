@@ -20,6 +20,10 @@ if opts.CSIMount != nil {
 ```
 InitRuntime, process SecurityToken and CSI are all operated in real pod.
 
+InitRuntime:向 Pod 内 agent-runtime sidecar 发 /init 请求 —— 目标地址是这个 Pod 的 runtimeURL(Pod IP/service)。
+SecurityToken:把新签发的 token 推送(propagate) 到那个新起来的 runtime,写成 token 文件。
+CSI:把卷真正挂载到这个 Pod 上。
+
 
 solution:
 
