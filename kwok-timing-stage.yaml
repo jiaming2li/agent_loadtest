@@ -135,7 +135,7 @@ spec:
   selector:
     matchExpressions:
       - key: '.metadata.deletionTimestamp'
-        operator: Exists                     # 正在删除
+        operator: Exists                     # needs deletion
   delay:
     durationFrom:
       expressionFrom: '.metadata.deletionTimestamp'   # when apiserver receive deletion request
