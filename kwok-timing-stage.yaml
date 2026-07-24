@@ -138,7 +138,7 @@ spec:
         operator: Exists                     # 正在删除
   delay:
     durationFrom:
-      expressionFrom: '.metadata.deletionTimestamp'   # 锚定到被删时刻
+      expressionFrom: '.metadata.deletionTimestamp'   # when apiserver receive deletion request
     durationMilliseconds: 5000               # +5s grace
     jitterDurationMilliseconds: 10000        # actual 5~10s random
   next:
