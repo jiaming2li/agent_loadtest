@@ -57,7 +57,7 @@ spec:
       {{ $now := Now }}
       phase: Running
       hostIP: "10.0.0.1"
-      podIP: "10.244.0.1"                    # ⚠️ 静态占位（沙箱只需非空 IP）
+      podIP: "10.244.0.1"                    # static placeholder (sandbox only needs a non-empty IP)
       conditions:
       - { type: Initialized,   status: "True",  lastTransitionTime: {{ $now | Quote }} }
       - { type: Ready,         status: "True",  lastTransitionTime: {{ $now | Quote }} }
@@ -164,10 +164,10 @@ spec:
       - key: '.metadata.deletionTimestamp'
         operator: DoesNotExist
       - key: '.metadata.annotations["agents.kruise.io/inplace-update-state"]'
-        operator: Exists                     # 正在原地更新
+        operator: Exists                     # need update
       - key: '.status.containerStatuses.[] | select(.name == "sandbox") | .imageID'
         operator: NotIn
-        values: ["kwok://inplace-updated"]   # 还没被标记完成
+        values: ["kwok://inplace-updated"]   # has updated
       - key: '.status.containerStatuses.[] | select(.name == "sandbox") | .state.waiting.reason'
         operator: NotIn
         values: ["ImagePullBackOff"]         # failed
