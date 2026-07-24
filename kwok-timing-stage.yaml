@@ -45,8 +45,10 @@ spec:
       - key: '.status.containerStatuses.[] | select(.name == "sandbox") | .state.waiting.reason'
         operator: NotIn
         values: ["ImagePullBackOff"]
-  delay:
-    durationMilliseconds: 5000               # 基础 5s（拉镜像+启动）
+  delay: 
+    durationFrom:
+      expressionFrom: '.metadata.creationTimestamp'
+    durationMilliseconds: 5000               # 基础 5s（拉镜像+启动, 从 stage 引擎第一次看到这个 pod 匹配 selector 的那一刻开始算
     jitterDurationMilliseconds: 12000        # 实际 5~12s 随机
   next:
     statusSubresource: status
@@ -70,7 +72,7 @@ spec:
         restartCount: 0
         state: { running: { startedAt: {{ $now | Quote }} } }
       {{ end }}
-  weight: 9                                  # ~90% 成功
+  weight: 99                                  # 某个 pod 在某一刻,如果有多个 stage 的 selector 都匹配它
 ---
 apiVersion: kwok.x-k8s.io/v1alpha1
 kind: Stage
@@ -206,7 +208,7 @@ spec:
         restartCount: 1
         state: { running: { startedAt: {{ $now | Quote }} } }
       {{ end }}
-  weight: 9                                  # ~90% 更新成功
+  weight: 99                                  # ~90% 更新成功
 ---
 apiVersion: kwok.x-k8s.io/v1alpha1
 kind: Stage
@@ -230,7 +232,7 @@ spec:
         values: ["ImagePullBackOff"]         # 防重复触发
   delay:
     durationMilliseconds: 5000
-    jitterDurationMilliseconds: 12000
+    jitterDurationMilliseconds: 12000 #原地更新没有一个现成的"更新发起时刻"时间戳可锚
   next:
     statusSubresource: status
     statusTemplate: |
@@ -244,15 +246,6 @@ spec:
             reason: "ImagePullBackOff"
             message: "simulated in-place update image pull failure"
       {{ end }}
-  weight: 1                                  # ~10% 更新失败
+  weight: 1                                  # ~1% 更新失败
 
-# ══════════════════════════════════════════════════════════════
-# 验证（apply 后）
-#   1) 建一个沙箱，看它能否变 Ready 且有 podIP：
-#        kubectl get sbx <name> -o custom-columns=\
-#          'NAME:.metadata.name,READY:.status.conditions[?(@.type=="Ready")].status,IP:.status.sandboxIp'
-#      READY=True、IP 非空 → pod-ready 成功路径 OK。
-#   2) 删一个 pod，确认 5~10s 后才消失（不是瞬间）：
-#        kubectl delete pod <name>; watch kubectl get pod <name>
-#   3) 若测容量/吞吐：把三个 *-fail 的 weight 设 0（或删掉），避免失败污染指标。
-# ══════════════════════════════════════════════════════════════
+
