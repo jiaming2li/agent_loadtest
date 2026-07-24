@@ -1,62 +1,15 @@
-#### e2b create.go `createSandboxWithClaim()`
-```
-if !request.Extensions.SkipInitRuntime {
-		opts.InitRuntime = &config.InitRuntimeOptions{
-			EnvVars:     request.EnvVars,
-			AccessToken: accessToken,
-		}
-	}
-```
+Note: this is a candidate lfx mentorship program, and will be assign to the selected mentee
 
-pkg/sandbox-manager/infra/sandboxcr/claim.go:218-227
+What would you like to be added:
 
-```
-if opts.InitRuntime != nil {
-    metrics.InitRuntime, err = runtime.InitRuntime(ctx, sbx.Sandbox, *opts.InitRuntime, ...)
-    if err != nil {
-        err = retriableError{...}   // ← 失败返回可重试错误(重试风暴的源头)
-        return
-    }
-}
-```
-#### cr
-api/v1alpha1/sandboxclaim_types.go:116
+load testing framework that can evaluate the performance of OpenKruise Agents in large scale cases using Kwok
+GitHub workflow and scripts to regularly run the load testing and report the evaluation results.
+Possible sandbox controller modifications to enable lightweight load testing.
+Why is this needed:
 
+rapid and large scale sandbox provision is crucial for agentic-workloads. OpenKruise agents had optimized rapid sandbox provisioning using techniques such as pooling and efficient sandbox discovering.
+To ensure no regression occurs, it is important to continuously test and evaluate the performance of OpenKruise Agents in a lightweight and resource efficient way.
 
-`SkipInitRuntime bool json:"skipInitRuntime,omitempty"`
-
-### claim_with_update（修改对应spec,等待reconcile）
-```
-curl -X POST http://127.0.0.1:8080/sandboxes \
-  -H "Host: api.localhost" -H "X-API-KEY: some-api-key" -H "Content-Type: application/json" \
-  -d '{
-    "templateID": "loadtest",
-    "metadata": {
-      "e2b.agents.kruise.io/skip-init-runtime": "true",
-      "e2b.agents.kruise.io/image": "busybox:1.36",
-      "e2b.agents.kruise.io/cpu-request": "200m",
-      "e2b.agents.kruise.io/cpu-limit": "500m"
-    }
-  }'
-```
-
-```
-create.go:
-  parseExtensionImage (extensions.go:152)     ← 读 metadata["...image"]
-  parseExtensionResources (extensions.go:165) ← 读 cpu-request/cpu-limit
-  → request.Extensions.InplaceUpdate
-create.go:116:
-  if InplaceUpdate.Image != "" || Resources != nil {
-    opts.InplaceUpdate = {Image, Resources}
-  }
-→ claim.go:174 pick 阶段 modifyPickedSandbox 应用 + 走 in-place 更新流程
-```
-
-`sandbox_controller.go`:245 : `err = r.getControl(args.Pod).EnsureSandboxUpdated(ctx, args)`
-
-`common_control.go:105`: `EnsureSandboxUpdated()` 
-common_inplace_update_handler.go:49 handleInPlaceUpdateCommon
-
-
+This project aims to build a load testing framework using tools such as Kwok to evaluate the performance of OpenKruise Agents in large scale cases. (e.g. 100,000 sandboxes), and construct a workflow to regularly run the load testing and report the evaluation results.
 
 
