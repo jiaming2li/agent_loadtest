@@ -144,28 +144,7 @@ spec:
     delete: true                             # 移除 pod
   weight: 0
 
-# ── （可选）删除失败：卡 Terminating ──
-# ⚠️ 启用后 ~10% 的 pod 被删后【永不消失】，会让 pause/delete 卡住。
-#    一般不要开；仅测"删除卡住/finalizer 卡住"时启用（把上面 pod-delete 加 weight: 9，
-#    并取消下面注释、给它 weight: 1，两者同 selector 按权重分流）。
-# ---
-# apiVersion: kwok.x-k8s.io/v1alpha1
-# kind: Stage
-# metadata:
-#   name: pod-delete-stuck
-# spec:
-#   resourceRef: { apiGroup: v1, kind: Pod }
-#   selector:
-#     matchExpressions:
-#       - key: '.metadata.deletionTimestamp'
-#         operator: Exists
-#   delay:
-#     durationMilliseconds: 5000
-#   next:
-#     statusSubresource: status
-#     statusTemplate: |                       # 只标记，不 delete → 卡 Terminating
-#       reason: "SimulatedStuckTerminating"
-#   weight: 1
+
 
 # ══════════════════════════════════════════════════════════════
 # 3) 原地更新：pod-inplace-update-complete（成功） + fail（ImagePullBackOff）
