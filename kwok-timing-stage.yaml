@@ -145,7 +145,8 @@ spec:
     delete: true                             # remove pod
   weight: 0
 
-
+# 会把测试搞乱:卡住的 pod 永远不消失 → pod 数永远回不到 0 → pause/resume/缩容全卡死,后续测量全被污染(前面清理残留 pod 卡 30s+ 就是这个味道)。
+# 删除本身很少"失败":向 apiserver 发 DELETE 几乎总成功(盖上 deletionTimestamp)。真正会出问题的是"卡在 Terminating"(finalizer 卡住、节点异常),那是边缘 case,不是你测容量/吞吐时想要的常见失败模式。
 
 # ══════════════════════════════════════════════════════════════
 # 3) update：pod-inplace-update-complete（success） + fail（ImagePullBackOff）
